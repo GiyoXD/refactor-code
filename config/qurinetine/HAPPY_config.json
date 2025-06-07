@@ -1,0 +1,437 @@
+{
+  "sheets_to_process": ["Invoice", "Contract", "Packing list"],
+  "sheet_data_map": {
+    "Invoice": "aggregation",
+    "Contract": "aggregation",
+    "Packing list": "processed_tables_multi"
+  },
+  "footer_rules": {
+    "type": "find_text_in_cell",
+    "marker_text": "total",
+    "search_type": "substring",
+    "case_sensitive": false,
+    "search_columns": [1, 2, 3, 4, 5],
+    "search_direction": "up"
+  },
+  "data_mapping": {
+    "Invoice": {
+      "rows_after_footer_enabled": true,
+      "rows_after_footer": [
+        {
+          "height": 34,
+          "font": {
+            "name": "Times New Roman",
+            "size": 12,
+            "bold": true
+          },
+          "content": [
+            {
+              "col": 2,
+              "label": "NW:"
+            },
+            {
+              "col": 3,
+              "value_key": "grand_total_nett_weight",
+              "suffix": " KGS",
+              "number_format": "#,##0.00"
+            }
+          ]
+        },
+        {
+          "height": 34,
+          "font": {
+            "name": "Times New Roman",
+            "size": 12,
+            "bold": true
+          },
+          "content": [
+            {
+              "col": 2,
+              "label": "GW:"
+            },
+            {
+              "col": 3,
+              "value_key": "grand_total_gross_weight",
+              "suffix": " KGS",
+              "number_format": "#,##0.00"
+            }
+          ]
+        }
+      ],
+      "footer_pallet_count_column_header": "ITEM N°",
+      "start_row": 19,
+      "row_spacing": 1,
+      "add_blank_after_header": false,
+      "static_content_after_header": {
+        "1": "--- Start of Invoice Data ---",
+        "7": 0.00
+      },
+      "add_blank_before_footer": false,
+      "static_content_before_footer": {
+        "2": "HS CODE: 4202.92.00"
+      },
+      "header_to_write": [
+        [
+          "Mark & N°",
+          "P.O N°",
+          "ITEM N°",
+          "Description",
+          "Quantity\n(SF)",
+          "Unit Price\n(USD)",
+          "Amount(USD)"
+        ]
+      ],
+      "mappings": {
+        "PO_from_key": {
+          "key_index": 0,
+          "header": "P.O N°"
+        },
+        "Item_from_key": {
+          "key_index": 1,
+          "header": "ITEM N°"
+        },
+        "Desc_From_Key_Tuple": {
+          "key_index": 3,
+          "header": "Description",
+          "fallback_on_none": "COW LEATHER\nDA BÒ THUỘC"
+        },
+        "SqFt_from_val": {
+          "value_key": "sqft_sum",
+          "header": "Quantity\n(SF)"
+        },
+        "Unit_from_key": {
+          "key_index": 2,
+          "header": "Unit Price\n(USD)"
+        },
+        "Amount_formula": {
+          "header": "Amount(USD)",
+          "type": "formula",
+          "formula_template": "{col_ref_1}{row} * {col_ref_0}{row}",
+          "inputs": [
+            "Quantity\n(SF)",
+            "Unit Price\n(USD)"
+          ]
+        },
+        "Initial_Col1_Static": {
+          "type": "initial_static_rows",
+          "column_header": "Mark & N°",
+          "values": [
+            "VENDOR#:",
+            "Des: COW LEATHER",
+            "Case Qty:",
+            "MADE IN CAMBODIA"
+          ]
+        }
+      },
+      "merge_rules_after_header": {},
+      "merge_rules_before_footer": {
+        "2": 2
+      },
+      "merge_rules_footer": {},
+      "styling": {
+        "force_text_format_headers": [
+          "P.O N°",
+          "ITEM N°",
+          "Mark & N°"
+        ],
+        "columns_with_full_grid": [
+          "P.O N°",
+          "ITEM N°",
+          "Description",
+          "Quantity\n(SF)",
+          "Unit Price\n(USD)",
+          "Amount(USD)"
+        ],
+        "default_font": {
+          "name": "Times New Roman",
+          "size": 12,
+          "bold": false,
+          "italic": false
+        },
+        "default_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "column_styles": {
+          "Amount(USD)": {
+            "font": {
+              "bold": false
+            },
+            "alignment": {
+              "horizontal": "center"
+            },
+            "number_format": "#,##0.00"
+          },
+          "Unit Price\n(USD)": {
+            "alignment": {
+              "horizontal": "center"
+            },
+            "number_format": "#,##0.000000"
+          },
+          "Quantity\n(SF)": {
+            "alignment": {
+              "horizontal": "center"
+            },
+            "number_format": "#,##0.00"
+          },
+          "Description": {
+            "alignment": {
+              "horizontal": "center"
+            }
+          },
+          "Mark & N°": {
+            "alignment": {
+              "horizontal": "left",
+              "vertical": "center"
+            }
+          }
+        },
+        "column_widths": {
+          "Mark & N°": 26,
+          "P.O N°": 27,
+          "ITEM N°": 33,
+          "Description": 20,
+          "Quantity\n(SF)": 18,
+          "Unit Price\n(USD)": 18,
+          "Amount(USD)": 23
+        },
+        "header_font": {
+          "name": "Times New Roman",
+          "size": 12,
+          "bold": true
+        },
+        "header_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "row_heights": {
+          "header": 35,
+          "data_default": 35,
+          "footer": 35,
+          "after_header": 35,
+          "before_footer": 35,
+          "specific_rows": {}
+        }
+      }
+    },
+    "Contract": {
+      "total_footer_text": "TOTAL AMOUNT(Tổng trị giá):",
+      "start_row": 19,
+      "row_spacing": 0,
+      "add_blank_after_header": false,
+      "static_content_after_header": {},
+      "add_blank_before_footer": false,
+      "static_content_before_footer": {},
+      "header_to_write": [
+        ["P.O N°", "Name of Cormodity\nTên và miêu", "Description\ntả hàng hóa", "Quantity\nSố lượng(SF)", "Unit Price\nĐơn giá(USD)", "Total value\nTrị giá(USD)"]
+      ],
+      "mappings": {
+        "PO_from_key": {"key_index": 0, "header": "P.O N°"},
+        "Item_from_key": {"key_index": 1, "header": "Name of Cormodity\nTên và miêu"},
+        "Desc_From_Key_Tuple": {
+          "key_index": 3,
+          "header": "Description\ntả hàng hóa",
+          "fallback_on_none": "COW LEATHER\nDA BÒ THUỘC"
+        },
+        "SqFt_from_val": {"value_key": "sqft_sum", "header": "Quantity\nSố lượng(SF)"},
+        "Unit_from_key": {"key_index": 2, "header": "Unit Price\nĐơn giá(USD)"},
+        "Amount_formula_contract": {
+          "header": "Total value\nTrị giá(USD)",
+          "type": "formula",
+          "formula_template": "{col_ref_1}{row} * {col_ref_0}{row}",
+          "inputs": [
+            "Quantity\nSố lượng(SF)",
+            "Unit Price\nĐơn giá(USD)"
+          ]
+        }
+      },
+      "merge_rules_after_header": {},
+      "merge_rules_before_footer": {},
+      "merge_rules_footer": {
+        "1": 2
+      },
+      "styling": {
+        "force_text_format_headers": [
+          "P.O N°",
+          "Name of Cormodity\nTên và miêu",
+          "NO"
+        ],
+        "columns_with_full_grid": [
+          "NO",
+          "P.O N°",
+          "Name of Cormodity\nTên và miêu",
+          "Description\ntả hàng hóa",
+          "Quantity\nSố lượng(SF)",
+          "Unit Price\nĐơn giá(USD)",
+          "Total value\nTrị giá(USD)"
+        ],
+        "default_font": {
+          "name": "Times New Roman",
+          "size": 10,
+          "bold": false,
+          "italic": false
+        },
+        "default_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "column_styles": {
+          "Total value\nTrị giá(USD)": {
+            "font": {"bold": false},
+            "alignment": {"horizontal": "center"},
+            "number_format": "#,##0.00"
+          },
+          "Unit Price\nĐơn giá(USD)": {
+            "alignment": {"horizontal": "center"},
+            "number_format": "#,##0.000000"
+          },
+          "Quantity\nSố lượng(SF)": {
+            "alignment": {"horizontal": "center"},
+            "number_format": "#,##0.00"
+          },
+          "Description\ntả hàng hóa": {
+            "alignment": {"horizontal": "left"}
+          },
+          "P.O N°": {
+            "alignment": {"horizontal": "center"}
+          }
+        },
+        "column_widths": {
+          "NO": 14,
+          "Name of Cormodity\nTên và miêu": 30,
+          "P.O N°": 27,
+          "Description\ntả hàng hóa": 17,
+          "Quantity\nSố lượng(SF)": 19,
+          "Unit Price\nĐơn giá(USD)": 15,
+          "Total value\nTrị giá(USD)": 21
+        },
+        "header_font": {
+          "name": "Times New Roman",
+          "size": 10,
+          "bold": true
+        },
+        "header_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "row_heights": {
+          "header": 36,
+          "data_default": 30
+        }
+      }
+    },
+    "Packing list": {
+      "start_row": 19,
+      "row_spacing": 1,
+      "add_blank_after_header": false,
+      "add_blank_before_footer": true,
+      "summary": false,
+      "static_content_before_footer": {
+        "2": "LEATHER (HS.CODE: 4107.12.00)"
+      },
+      "header_to_write": [
+        ["Mark & Nº", "P.O N°", "ITEM N°", "Description", "Quantity", null, "N.W (kgs)", "G.W (kgs)", "CBM"],
+        [null, null, null, null, "PCS", "SF", null, null, null]
+      ],
+      "header_merge_rules": {
+        "Quantity": {"colspan": 2}
+      },
+      "mappings": {
+        "Initial_Col1_Static_PL": {
+          "type": "initial_static_rows",
+          "column_header": "Mark & Nº",
+          "values": ["VENDOR#:", "Des: COW LEATHER","Case Qty:", "MADE IN CAMBODIA"]
+        },
+        "po": "P.O N°",
+        "item": "ITEM N°",
+        "pcs": "PCS",
+        "sqft": "SF",
+        "net": "N.W (kgs)",
+        "gross": "G.W (kgs)",
+        "cbm": "CBM",
+        "line_no": null,
+        "description": {
+          "header": "Description",
+          "fallback_on_none": "COW LEATHER"
+        }
+      },
+      "merge_rules_after_header": {},
+      "merge_rules_before_footer": {
+        "2": 2
+      },
+      "merge_rules_footer": {
+      },
+      "footer_pallet_count_column_header": "ITEM N°",
+      "styling": {
+        "force_text_format_headers": [
+          "P.O N°",
+          "ITEM N°",
+          "Mark & Nº"
+        ],
+        "columns_with_full_grid": [
+          "P.O N°",
+          "ITEM N°",
+          "Description",
+          "PCS",
+          "SF",
+          "N.W (kgs)",
+          "G.W (kgs)",
+          "CBM"
+        ],
+        "default_font": {
+          "name": "Times New Roman",
+          "size": 12
+        },
+        "default_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "column_styles": {
+          "Mark & Nº": {
+            "alignment": {"horizontal": "left", "vertical": "top"},
+            "font": {"size": 12}
+          },
+          "Description": {
+            "alignment": {"horizontal": "center"}
+          },
+          "N.W (kgs)": {"number_format": "#,##0.00"},
+          "G.W (kgs)": {"number_format": "#,##0.00"},
+          "CBM": {"number_format": "0.00"},
+          "PCS": {"number_format": "#,##0"},
+          "SF": {"number_format": "#,##0.00"}
+        },
+        "column_widths": {
+          "Mark & Nº": 24.71,
+          "P.O N°": 16,
+          "ITEM NO": 16,
+          "Description": 19,
+          "PCS": 15,
+          "SF": 15,
+          "N.W (kgs)": 15,
+          "G.W (kgs)": 15,
+          "CBM": 15
+        },
+        "header_font": {
+          "name": "Times New Roman",
+          "size": 12,
+          "bold": true
+        },
+        "header_alignment": {
+          "horizontal": "center",
+          "vertical": "center",
+          "wrap_text": true
+        },
+        "row_heights": {
+          "header": 27,
+          "data_default": 27,
+          "before_footer": 27
+        }
+      }
+    }
+  }
+}
