@@ -409,6 +409,7 @@ def main():
             merge_rules_before_ftr = sheet_mapping_section.get("merge_rules_before_footer", {})
             merge_rules_footer = sheet_mapping_section.get("merge_rules_footer", {})
             data_cell_merging_rules = sheet_mapping_section.get("data_cell_merging_rule", None)
+            sheet_header_to_write = sheet_mapping_section.get("header_to_write", None)
 
             print(f"DEBUG Check Flags Read for Sheet '{sheet_name}': after_hdr={add_blank_after_hdr_flag}, before_ftr={add_blank_before_ftr_flag}")
             if sheet_styling_config: print("DEBUG: Styling config found for this sheet.")
@@ -514,7 +515,7 @@ def main():
  
                     print(f"Writing header for table '{table_key}' at row {write_pointer_row}...");
                     written_header_info = invoice_utils.write_header(
-                        worksheet, write_pointer_row, header_to_write, header_merge_rules, sheet_styling_config
+                        worksheet, write_pointer_row, sheet_header_to_write, sheet_styling_config
                     )
                     if not written_header_info: print(f"Error writing header for table '{table_key}'. Skipping sheet."); processing_successful = False; break
                     last_table_header_info = written_header_info # Keep track for width setting later
@@ -531,8 +532,8 @@ def main():
  
                     # Modify the header_info dict passed to fill_invoice_data dynamically
                     temp_header_info = written_header_info.copy()
-                    temp_header_info['first_row_index'] = write_pointer_row - num_header_rows # The row where header started
-                    temp_header_info['second_row_index'] = write_pointer_row - 1 # The last row of the header
+                    temp_header_info['first_row_index'] = write_pointer_row - num_header_rows # The row wherea header started
+                    temp_header_info['second_row_index'] = temp_header_info['first_row_index'] + 1 # The last row of the header
  
                     fill_success, next_row_after_chunk, data_start, data_end, table_pallets = invoice_utils.fill_invoice_data(
                         worksheet=worksheet,
@@ -975,24 +976,16 @@ def main():
 
                 start_row = sheet_mapping_section.get('start_row');
                 header_to_write = sheet_mapping_section.get('header_to_write');
-                header_merge_rules = sheet_mapping_section.get('header_merge_rules')
                 if not start_row or not header_to_write: print(f"Error: Config for '{sheet_name}' missing 'start_row' or 'header_to_write'. Skipping."); processing_successful = False; continue
 
                 print(f"Writing header at row {start_row}...");
                 header_info = invoice_utils.write_header(
-                    worksheet, start_row, header_to_write, header_merge_rules, sheet_styling_config
+                    worksheet, start_row, header_to_write, sheet_styling_config
                 )
                 if not header_info: print(f"Error: Failed to write header for '{sheet_name}'. Skipping."); processing_successful = False; continue
                 print(f"DEBUG: Header Info for '{sheet_name}':")
                 print(f"  - Column Map: {header_info.get('column_map')}")
                 print(f"Header written successfully.")
-
-                # --- Find Footer --- (Existing logic)
-                if global_footer_rules and global_footer_rules.get('marker_text'):
-                     print("Finding footer marker...");
-                     footer_info = invoice_utils.find_footer(worksheet, global_footer_rules)
-                     if not footer_info: print(f"Warning: Footer marker '{global_footer_rules.get('marker_text')}' not found.")
-                else: print(f"Footer marker found: {footer_info}")
 
                 # --- Get Data Source ---
                 data_to_fill = None; data_source_type = None

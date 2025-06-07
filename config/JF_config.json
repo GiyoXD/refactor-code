@@ -28,7 +28,14 @@
         "2": "HS CODE: 4202.92.00"
       },
       "header_to_write": [
-        ["Mark & N°", "P.O N°", "ITEM N°", "Description", "Quantity ( SF )", "Unit price ( USD )", "Amount ( USD )"]
+        { "row": 0, "col": 0, "text": "it good",                 "id": "col_no",   "rowspan": 2 },
+        { "row": 0, "col": 1, "text": "P.O. Nº",               "id": "col_po",   "rowspan": 2 },
+        { "row": 0, "col": 2, "text": "ITEM Nº",               "id": "col_item", "rowspan": 2 },
+        { "row": 0, "col": 3, "text": "Quantity",                             "colspan": 2 },
+        { "row": 0, "col": 5, "text": "Description",         "id": "col_desc", "rowspan": 2 },
+
+        { "row": 1, "col": 3, "text": "PCS",                 "id": "col_qty_pcs" },
+        { "row": 1, "col": 4, "text": "SF",                  "id": "col_qty_sf" }
       ],
       "mappings": {
         "PO_from_key": {"key_index": 0, "header": "P.O N°"},
@@ -58,23 +65,23 @@
       "data_cell_merging_rule": {
         "ITEM N°": {"rowspan": 2}
       },
-      "merge_rules_after_header": {},
-      "merge_rules_before_footer": {"2": 2},
-      "merge_rules_footer": {},
       "styling": {
-        "force_text_format_headers": [
-          "P.O N°",
-          "ITEM N°",
-          "Mark & N°"
-        ],
-        "columns_with_full_grid": [
-          "P.O N°",
-          "ITEM N°",
-          "Description",
-          "Quantity ( SF )",
-          "Unit price ( USD )",
-          "Amount ( USD )"
-        ],
+"force_text_format_ids": [ "col_po", "col_item" ],
+    "grid_column_ids": [ "col_po", "col_desc" ],
+    "column_styles": {
+      "col_amt_usd": {
+        "font": {"bold": false},
+        "alignment": {"horizontal": "center"},
+        "number_format": "#,##0.00"
+      },
+      "col_desc": {
+        "alignment": {"horizontal": "center"}
+      }
+    },
+    "column_widths": {
+      "col_po": 28,
+      "col_desc": 20
+    },
         "default_font": {
           "name": "Times New Roman",
           "size": 12,
@@ -85,36 +92,6 @@
           "horizontal": "center",
           "vertical": "center",
           "wrap_text": true
-        },
-        "column_styles": {
-          "Amount ( USD )": {
-            "font": {"bold": false},
-            "alignment": {"horizontal": "center"},
-            "number_format": "#,##0.00"
-          },
-          "Unit price ( USD )": {
-            "alignment": {"horizontal": "center"},
-            "number_format": "#,##0.00"
-          },
-          "Quantity ( SF )": {
-            "alignment": {"horizontal": "center"},
-            "number_format": "#,##0.00"
-          },
-          "Description": {
-            "alignment": {"horizontal": "center"}
-          },
-          "Mark & N°": {
-            "alignment": {"horizontal": "center", "vertical": "top"}
-          }
-        },
-        "column_widths": {
-          "Mark & N°": 23,
-          "P.O N°": 28,
-          "ITEM N°": 21,
-          "Description": 20,
-          "Quantity ( SF )": 18,
-          "Unit price ( USD )": 18,
-          "Amount ( USD )": 23
         },
         "header_font": {
           "name": "Times New Roman",
@@ -144,7 +121,14 @@
       "add_blank_before_footer": false,
       "static_content_before_footer": {},
       "header_to_write": [
-        ["NO", "ITEM N°", "Quantity(SF)", "Unit Price(USD)", "Total value(USD)"]
+        { "row": 0, "col": 0, "text": "NO.",                 "id": "col_no",   "rowspan": 2 },
+        { "row": 0, "col": 1, "text": "P.O. Nº",               "id": "col_po",   "rowspan": 2 },
+        { "row": 0, "col": 2, "text": "ITEM Nº",               "id": "col_item", "rowspan": 2 },
+        { "row": 0, "col": 3, "text": "Quantity",                             "colspan": 2 },
+        { "row": 0, "col": 5, "text": "Description",         "id": "col_desc", "rowspan": 2 },
+
+        { "row": 1, "col": 3, "text": "PCS",                 "id": "col_qty_pcs" },
+        { "row": 1, "col": 4, "text": "SF",                  "id": "col_qty_sf" }
       ],
       "mappings": {
         "PO_from_key": {"key_index": 0, "header": "P.O Nº"},
@@ -260,9 +244,21 @@
         "2": "LEATHER (HS.CODE: 4107.12.00)"
       },
       "header_to_write": [
-        ["Mark & Nº", "P.O N°", "ITEM N°", "Description", "Quantity", null, "N.W (kgs)", "G.W (kgs)", "CBM"],
-        [null, null, null, null, "PCS", "SF", null, null, null]
+        { "row": 0, "col": 0, "text": "Mark & Nº",                 "id": "col_no",   "rowspan": 2 },
+        { "row": 0, "col": 1, "text": "P.O Nº",               "id": "col_po",   "rowspan": 2 },
+        { "row": 0, "col": 2, "text": "ITEM Nº",               "id": "col_item", "rowspan": 2 },
+        { "row": 0, "col": 4, "text": "Quantity",                             "colspan": 2 },
+        { "row": 0, "col": 3, "text": "Description",         "id": "col_desc", "rowspan": 2 },
+        { "row": 0, "col": 6, "text": "G.W (kgs)", "id": "col_gross", "rowspan": 2 },
+        { "row": 0, "col": 7, "text": "N.W (kgs)", "id": "col_net", "rowspan": 2 },
+        { "row": 0, "col": 8, "text": "CBM", "id": "col_cbm", "rowspan": 2 },
+
+        { "row": 1, "col": 4, "text": "PCS",                 "id": "col_qty_pcs" },
+        { "row": 1, "col": 5, "text": "SF",                  "id": "col_qty_sf" }
       ],
+      "footer_config": {
+        
+      }
       "header_merge_rules": {
         "Quantity": {"colspan": 2}
       },
@@ -300,21 +296,20 @@
           "fill_type": "solid",
           "start_color": "D3D3D3"
         },
-
-        "force_text_format_headers": [
-          "P.O N°",
-          "ITEM N°",
-          "Mark & Nº"
+        "force_text_format_ids": [
+          "col_po",
+          "col_item",
+          "col_no"
         ],
-        "columns_with_full_grid": [
-          "P.O N°",
-          "ITEM N°",
-          "Description",
-          "PCS",
-          "SF",
-          "N.W (kgs)",
-          "G.W (kgs)",
-          "CBM"
+        "column_ids_with_full_grid": [
+          "col_po",
+          "col_item",
+          "col_desc",
+          "col_qty_pcs",
+          "col_qty_sf",
+          "col_net",
+          "col_gross",
+          "col_cbm"
         ],
         "default_font": {
           "name": "Times New Roman",
@@ -325,30 +320,30 @@
           "vertical": "center",
           "wrap_text": true
         },
-        "column_styles": {
-          "Mark & Nº": {
+        "column_id_styles": {
+          "col_no": {
             "alignment": {"horizontal": "left", "vertical": "top"},
             "font": {"size": 12}
           },
-          "Description": {
+          "col_desc": {
             "alignment": {"horizontal": "center"}
           },
-          "N.W (kgs)": {"number_format": "#,##0.00"},
-          "G.W (kgs)": {"number_format": "#,##0.00"},
-          "CBM": {"number_format": "0.00"},
-          "PCS": {"number_format": "#,##0"},
-          "SF": {"number_format": "#,##0.00"}
+          "col_net": {"number_format": "#,##0.00"},
+          "col_gross": {"number_format": "#,##0.00"},
+          "col_cbm": {"number_format": "0.00"},
+          "col_qty_pcs": {"number_format": "#,##0"},
+          "col_qty_sf": {"number_format": "#,##0.00"}
         },
-        "column_widths": {
-          "Mark & Nº": 24.71,
-          "P.O N°": 17,
-          "ITEM NO": 22.14,
-          "Description": 26,
-          "PCS": 15,
-          "SF": 15,
-          "N.W (kgs)": 15,
-          "G.W (kgs)": 15,
-          "CBM": 15
+        "column_id_widths": {
+          "col_no": 24.71,
+          "col_po": 17,
+          "col_item": 22.14,
+          "col_desc": 26,
+          "col_qty_pcs": 15,
+          "col_qty_sf": 15,
+          "col_net": 15,
+          "col_gross": 15,
+          "col_cbm": 15
         },
         "header_font": {
           "name": "Times New Roman",

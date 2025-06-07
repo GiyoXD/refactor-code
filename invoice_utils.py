@@ -311,6 +311,7 @@ def _apply_cell_style(cell, column_header: Optional[str], sheet_styling_config: 
             # No explicit else needed, keep General or existing format otherwise
 
     except Exception as style_err:
+        print(f"Error applying cell style: {style_err} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         # Log general styling errors?
         pass
 
@@ -423,221 +424,119 @@ def find_header(worksheet: Worksheet, header_rules: Dict[str, Any]) -> Optional[
     except Exception as e: return None
 
 
-def write_header(worksheet: Worksheet, start_row: int, header_data: List[List[Any]],
-                 merge_rules: Optional[Dict[str, Any]] = None,
+def write_header(worksheet: Worksheet, start_row: int, header_layout_config: List[Dict[str, Any]],
                  sheet_styling_config: Optional[Dict[str, Any]] = None
                  ) -> Optional[Dict[str, Any]]:
-    if not header_data or not isinstance(header_data, list) or not all(isinstance(r, list) for r in header_data): return None
-    num_header_rows = len(header_data)
-    if num_header_rows == 0: return None
-    num_columns = 0
-    for r_data in header_data: num_columns = max(num_columns, len(r_data))
-    if num_columns == 0: return None
-    if start_row <= 0: return None
+    
+    if not header_layout_config or start_row <= 0:
+        return None
+
+    # Determine header dimensions from the layout config
+    num_header_rows = max(cell.get('row', 0) for cell in header_layout_config) + 1
+    num_columns = max(cell.get('col', 0) + cell.get('colspan', 1) for cell in header_layout_config)
     end_row = start_row + num_header_rows - 1
 
-    # --- Determine Header Styling ---
-    # Default styles
-    header_font_to_apply = bold_font       # Your defined default bold_font
-    header_alignment_to_apply = center_alignment # Your defined default center_alignment
-    header_border_to_apply = thin_border   # Your defined default thin_border
-    header_background_fill_to_apply = None # Initialize to no specific background
+    # Get header styling from config
+    header_font_to_apply = bold_font
+    header_alignment_to_apply = center_alignment
+    header_border_to_apply = thin_border
+    header_background_fill_to_apply = None # Default is no fill
 
+    # --- NEW: Code to parse header styling from the config ---
     if sheet_styling_config:
-        # Font configuration
+        # Get font from config
         header_font_cfg = sheet_styling_config.get("header_font")
         if header_font_cfg and isinstance(header_font_cfg, dict):
-            font_params = {k: v for k, v in header_font_cfg.items() if v is not None}
-            if font_params:
-                try: header_font_to_apply = Font(**font_params)
-                except TypeError: pass
+            try:
+                header_font_to_apply = Font(**header_font_cfg)
+            except TypeError:
+                pass # Keep default on error
 
-        # Alignment configuration
+        # Get alignment from config
         header_align_cfg = sheet_styling_config.get("header_alignment")
         if header_align_cfg and isinstance(header_align_cfg, dict):
-            align_params = {k: v for k, v in header_align_cfg.items() if v is not None}
-            if align_params:
-                try: header_alignment_to_apply = Alignment(**align_params)
-                except TypeError: pass
+            try:
+                header_alignment_to_apply = Alignment(**header_align_cfg)
+            except TypeError:
+                pass # Keep default on error
         
-        # --- Get and prepare header background fill ---
-        header_fill_cfg = sheet_styling_config.get("header_pattern_fill") # Key from your JSON
+        # Get background fill from config
+        header_fill_cfg = sheet_styling_config.get("header_pattern_fill")
         if header_fill_cfg and isinstance(header_fill_cfg, dict):
-            fill_params = {k: v for k, v in header_fill_cfg.items() if v is not None}
-            # Standardize keys for PatternFill constructor
-            if "start_color" in fill_params and "fgColor" not in fill_params:
-                fill_params["fgColor"] = fill_params.pop("start_color")
-            if "end_color" in fill_params and "bgColor" not in fill_params:
-                fill_params["bgColor"] = fill_params.pop("end_color")
-            if "fill_type" in fill_params and "patternType" not in fill_params:
-                fill_params["patternType"] = fill_params.pop("fill_type")
-            
-            if fill_params.get("fgColor") and fill_params.get("patternType"): # Essential params for PatternFill
-                try:
-                    header_background_fill_to_apply = PatternFill(**fill_params)
-                except TypeError as e_hf_type:
-                    print(f"Warning: Invalid header_pattern_fill parameters: {fill_params}. Error: {e_hf_type}")
-                except Exception as e_hf:
-                    print(f"Warning: Could not create header background fill: {e_hf}")
+            try:
+                # Create a PatternFill object from the config dictionary
+                header_background_fill_to_apply = PatternFill(**header_fill_cfg)
+            except TypeError:
+                # This could happen if config keys don't match PatternFill arguments
+                print(f"Warning: Invalid parameters in header_pattern_fill config: {header_fill_cfg}")
+                pass # Keep fill as None on error
+    # --- END NEW CODE ---
+
     try:
+        # 1. Unmerge the entire target area first
         unmerge_block(worksheet, start_row, end_row, num_columns)
 
-        for r_offset, row_values in enumerate(header_data):
-            current_row_idx = start_row + r_offset
-            padded_row_values = row_values[:num_columns] + [None] * (num_columns - len(row_values))
-            for c_idx_0based, value in enumerate(padded_row_values):
-                col_index_1based = c_idx_0based + 1
-                try:
-                    cell = worksheet.cell(row=current_row_idx, column=col_index_1based)
-                    cell.value = value
-                    cell.font = header_font_to_apply
-                    cell.alignment = header_alignment_to_apply
-                    cell.border = header_border_to_apply
-                    
-                    # ***** THIS IS THE CORRECTION *****
-                    if header_background_fill_to_apply:
-                        cell.fill = header_background_fill_to_apply
-                    # ***********************************
-                        
-                except Exception as write_err:
-                    # print(f"Error writing header cell: {write_err}")
-                    pass
-        
-        # --- Apply Vertical Merges ---
-        if num_header_rows >= 2:
-            for col_idx_1based in range(1, num_columns + 1):
-                val1 = worksheet.cell(row=start_row, column=col_idx_1based).value
-                if val1 is not None and str(val1).strip() != '':
-                    should_merge_vertically = True
-                    for r_offset in range(1, num_header_rows):
-                        val_below = worksheet.cell(row=start_row + r_offset, column=col_idx_1based).value
-                        if val_below is not None and str(val_below).strip() != '':
-                            should_merge_vertically = False
-                            break
-                    if should_merge_vertically:
-                        try:
-                            merge_end_row = end_row # start_row + num_header_rows - 1
-                            if start_row < merge_end_row: # Only merge if rowspan > 1
-                                worksheet.merge_cells(start_row=start_row, start_column=col_idx_1based, end_row=merge_end_row, end_column=col_idx_1based)
-                                # Ensure the anchor cell of the vertical merge has all styles
-                                anchor_cell = worksheet.cell(row=start_row, column=col_idx_1based)
-                                anchor_cell.alignment = header_alignment_to_apply
-                                anchor_cell.font = header_font_to_apply # Ensure font is applied too
-                                anchor_cell.border = header_border_to_apply # And border
-                                if header_background_fill_to_apply: # And fill
-                                     anchor_cell.fill = header_background_fill_to_apply
-                        except Exception: # nosemgrep: general-exception-caught
-                            pass 
+        column_map_by_text = {}
+        column_map_by_id = {}
 
-        # --- Apply Horizontal/Colspan Merges (from merge_rules) ---
-        if merge_rules:
-            temp_col_map_written = {}
-            first_header_row_idx = start_row
-            for c in range(1, num_columns + 1):
-                val = worksheet.cell(row=first_header_row_idx, column=c).value
-                if val is not None: 
-                    val_str = str(val).strip()
-                    if val_str and val_str not in temp_col_map_written: 
-                        temp_col_map_written[val_str] = c
+        # 2. Loop through the explicit layout configuration
+        for cell_config in header_layout_config:
+            # Get cell properties from the config object
+            relative_row = cell_config.get('row', 0)
+            relative_col = cell_config.get('col', 0)
+            text_to_write = cell_config.get('text')
+            cell_id = cell_config.get('id')
+            rowspan = cell_config.get('rowspan', 1)
+            colspan = cell_config.get('colspan', 1)
+
+            # Calculate absolute position on the worksheet
+            abs_row = start_row + relative_row
+            abs_col = 1 + relative_col # openpyxl is 1-based
+
+            # 3. Write value and apply style to the top-left cell
+            cell = worksheet.cell(row=abs_row, column=abs_col)
+            cell.value = text_to_write
+            cell.font = header_font_to_apply
+            cell.alignment = header_alignment_to_apply
+            cell.border = header_border_to_apply
             
-            for header_text, merge_config in merge_rules.items():
-                if isinstance(merge_config, dict):
-                    start_col_idx = temp_col_map_written.get(header_text)
-                    if start_col_idx:
-                        colspan = int(merge_config.get('colspan', 1))
-                        if colspan < 1: colspan = 1
-                        rowspan = int(merge_config.get('rowspan', 1))
-                        if rowspan < 1: rowspan = 1
-                        if first_header_row_idx + rowspan - 1 > end_row: rowspan = end_row - first_header_row_idx + 1
-                        
-                        end_col_idx = start_col_idx + colspan - 1
-                        end_row_idx = first_header_row_idx + rowspan - 1
-                        if end_col_idx > num_columns: end_col_idx = num_columns
+            # This line now applies the fill object we created from the config
+            if header_background_fill_to_apply:
+                cell.fill = header_background_fill_to_apply
 
-                        if end_col_idx >= start_col_idx and end_row_idx >= first_header_row_idx and (colspan > 1 or rowspan > 1):
-                            try:
-                                # Unmerge before merging is good practice, unmerge_block already called, 
-                                # but specific smaller unmerges might be needed if rules overlap in complex ways.
-                                # For now, assume initial unmerge_block is sufficient.
-                                worksheet.merge_cells(start_row=first_header_row_idx, start_column=start_col_idx, end_row=end_row_idx, end_column=end_col_idx)
-                                anchor_cell = worksheet.cell(row=first_header_row_idx, column=start_col_idx)
-                                anchor_cell.alignment = header_alignment_to_apply
-                                anchor_cell.font = header_font_to_apply # Ensure font
-                                anchor_cell.border = header_border_to_apply # Ensure border
-                                if header_background_fill_to_apply: # Ensure fill
-                                     anchor_cell.fill = header_background_fill_to_apply
-                            except ValueError: pass 
-                            except Exception: pass
+            # 4. Populate the ID and Text maps
+            if cell_id:
+                column_map_by_id[cell_id] = abs_col
+            if text_to_write:
+                column_map_by_text[str(text_to_write).strip()] = abs_col
 
-        # Rebuild Final Column Map (your existing logic)
-        column_map_final = {}
-        final_header_row_1_vals = [worksheet.cell(row=start_row, column=c).value for c in range(1, num_columns + 1)]
-        final_header_row_2_vals = []
-        final_second_row_index = start_row 
-        if num_header_rows >= 2:
-            final_second_row_index = start_row + 1
-            final_header_row_2_vals = [worksheet.cell(row=final_second_row_index, column=c).value for c in range(1, num_columns + 1)]
-        
-        final_quantity_col_idx = -1
-        if num_header_rows >= 2:
-            try: final_quantity_col_idx = final_header_row_1_vals.index("Quantity")
-            except (ValueError, TypeError): final_quantity_col_idx = -1
-            
-        for c_idx_0based in range(num_columns):
-            col_index_1based = c_idx_0based + 1
-            header_text_final = None
-            val_row1 = final_header_row_1_vals[c_idx_0based] if c_idx_0based < len(final_header_row_1_vals) else None
-            val_row2 = final_header_row_2_vals[c_idx_0based] if c_idx_0based < len(final_header_row_2_vals) else None
+            # 5. Apply merges if needed
+            if rowspan > 1 or colspan > 1:
+                end_merge_row = abs_row + rowspan - 1
+                end_merge_col = abs_col + colspan - 1
+                worksheet.merge_cells(
+                    start_row=abs_row,
+                    start_column=abs_col,
+                    end_row=end_merge_row,
+                    end_column=end_merge_col
+                )
 
-            if num_header_rows >= 2 and final_quantity_col_idx != -1:
-                if c_idx_0based == final_quantity_col_idx: 
-                    pcs_val = val_row2
-                    if pcs_val is not None and str(pcs_val).strip() == "PCS": header_text_final = "PCS"
-                    else: header_text_final = "Quantity"
-                    sf_col_index_0based = c_idx_0based + 1
-                    if sf_col_index_0based < len(final_header_row_2_vals):
-                        sf_val = final_header_row_2_vals[sf_col_index_0based]
-                        if sf_val is not None and str(sf_val).strip() == "SF":
-                            column_map_final["SF"] = col_index_1based + 1
-                    if header_text_final: 
-                        clean_h = str(header_text_final).strip()
-                        if clean_h and clean_h not in column_map_final: column_map_final[clean_h] = col_index_1based
-                    continue 
-                elif c_idx_0based == final_quantity_col_idx + 1: 
-                    if "SF" in column_map_final and column_map_final["SF"] == col_index_1based: continue
-            
-            if num_header_rows >= 2 and val_row2 is not None and str(val_row2).strip() != "": header_text_final = str(val_row2).strip()
-            elif val_row1 is not None and str(val_row1).strip() != "": header_text_final = str(val_row1).strip()
-            
-            if header_text_final: 
-                clean_h_final = str(header_text_final).strip()
-                if clean_h_final and clean_h_final not in column_map_final: column_map_final[clean_h_final] = col_index_1based
-        
-        if not column_map_final:
-            # print("Warning: write_header resulted in an empty column_map_final.")
-            # Fallback or decide how to handle. For now, let's try a basic map if num_columns > 0
-            if num_columns > 0 and not header_data[0]: # If first row of header_data is empty, this won't work well
-                 pass # Needs a better fallback if this case is possible
-            elif num_columns > 0 and header_data[0]: # Try to use first row of header_data if column_map_final is empty
-                for c_idx_0based, val_row1_fallback in enumerate(header_data[0][:num_columns]):
-                    if val_row1_fallback is not None:
-                        col_idx_1based_fb = c_idx_0based + 1
-                        hdr_txt_fb = str(val_row1_fallback).strip()
-                        if hdr_txt_fb and hdr_txt_fb not in column_map_final:
-                            column_map_final[hdr_txt_fb] = col_idx_1based_fb
-            if not column_map_final:
-                 # print("Error: Still failed to build column_map_final in write_header.") # Already printed usually
-                 return None
-
-
-        return {'first_row_index': start_row, 
-                'second_row_index': final_second_row_index, 
-                'column_map': column_map_final, 
-                'num_columns': num_columns}
+        return {
+            'first_row_index': start_row,
+            'second_row_index': end_row, # The last row of the entire header block
+            'column_map': column_map_by_text,
+            'column_id_map': column_map_by_id,
+            'num_columns': num_columns
+        }
 
     except Exception as e:
-        # print(f"Error in write_header during main try block: {e}")
-        # traceback.print_exc()
+        print(f"Error in write_header during layout processing: {e}")
+        traceback.print_exc()
+        return None
+
+    except Exception as e:
+        print(f"Error in write_header during layout processing: {e}")
+        traceback.print_exc()
         return None
 
 

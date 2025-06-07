@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/generate_invoice.py",
-            "args": ["data/KB.json", "-c", "config", "-t", "TEMPLATE", "--fob"],
+            "args": ["data/JF.json", "-c", "config", "-t", "TEMPLATE"],
             "console": "integratedTerminal"
         }
     ]
