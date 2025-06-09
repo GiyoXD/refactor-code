@@ -878,8 +878,233 @@ def apply_explicit_data_cell_merges(
         except Exception as e:
             print(f"Error applying explicit data cell merge, border, or alignment for '{header_text}' on row {row_num} (col {start_col_idx}, span {colspan_to_apply}): {e}")
 
+def prepare_data_rows(
+    data_source_type: str,
+    data_source: Union[Dict, List],
+    dynamic_mapping_rules: Dict[str, Any],
+    column_id_map: Dict[str, int],
+    idx_to_header_map: Dict[int, str], # Needed for FOB fallback
+    desc_col_idx: int,
+    num_static_labels: int,
+    static_value_map: Dict[int, Any]
+) -> Tuple[List[Dict[int, Any]], List[int], bool, int]:
+    """
+    Prepares the data rows for writing by transforming the source data based on mapping rules.
+    This version handles 'processed_tables_multi', 'aggregation', and 'fob_aggregation'.
+    """
+    data_rows_prepared = []
+    pallet_counts_for_rows = []
+    dynamic_desc_used = False
+    num_data_rows_from_source = 0
+
+    # --- Handler for 'processed_tables_multi' ---
+    if data_source_type == 'processed_tables_multi':
+        data_source = data_source or {}
+        max_len = 0
+        if isinstance(data_source, dict):
+            for value in data_source.values():
+                if isinstance(value, list):
+                    max_len = max(max_len, len(value))
+            num_data_rows_from_source = max_len
+            
+            raw_pallet_counts = data_source.get("pallet_count", [])
+            if isinstance(raw_pallet_counts, list):
+                pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts))
+            else:
+                pallet_counts_for_rows = [0] * max_len
+
+        if num_data_rows_from_source > 0:
+            for i in range(num_data_rows_from_source):
+                row_dict = {}
+                for data_key, mapping_rule in dynamic_mapping_rules.items():
+                    target_id = mapping_rule.get("id")
+                    target_col_idx = column_id_map.get(target_id)
+                    if target_col_idx:
+                        source_list = data_source.get(data_key, [])
+                        data_value = source_list[i] if i < len(source_list) else None
+                        
+                        is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
+                        
+                        if not is_empty:
+                            row_dict[target_col_idx] = data_value
+                            if target_col_idx == desc_col_idx:
+                                dynamic_desc_used = True
+                        elif "fallback_on_none" in mapping_rule:
+                            row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
+                
+                data_rows_prepared.append(row_dict)
+
+    # --- Handler for 'aggregation' ---
+    elif data_source_type == 'aggregation':
+        num_data_rows_from_source = len(data_source) if isinstance(data_source, dict) else 0
+        pallet_counts_for_rows = [1] * num_data_rows_from_source
+
+        if num_data_rows_from_source > 0:
+            for key_tuple, value_dict in data_source.items():
+                row_dict = {}
+                for mapping_rule in dynamic_mapping_rules.values():
+                    target_id = mapping_rule.get("id")
+                    target_col_idx = column_id_map.get(target_id)
+                    if not target_col_idx: continue
+
+                    data_value = None
+                    if 'key_index' in mapping_rule:
+                        key_index = mapping_rule['key_index']
+                        if isinstance(key_tuple, tuple) and 0 <= key_index < len(key_tuple):
+                            data_value = key_tuple[key_index]
+                    elif 'value_key' in mapping_rule:
+                        value_key = mapping_rule['value_key']
+                        if isinstance(value_dict, dict):
+                            data_value = value_dict.get(value_key)
+                    
+                    is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
+
+                    if not is_empty:
+                        row_dict[target_col_idx] = data_value
+                        if target_col_idx == desc_col_idx:
+                            dynamic_desc_used = True
+                    elif "fallback_on_none" in mapping_rule:
+                        row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
+                data_rows_prepared.append(row_dict)
+
+    # --- NEW: Handler for 'fob_aggregation' ---
+    elif data_source_type == 'fob_aggregation':
+        num_data_rows_from_source = len(data_source) if isinstance(data_source, dict) else 0
+        pallet_counts_for_rows = [0] * num_data_rows_from_source # Pallets handled globally for FOB
+
+        if num_data_rows_from_source > 0:
+            sorted_keys = sorted(data_source.keys(), key=lambda k: int(k) if k.isdigit() else float('inf'))
+            for row_key in sorted_keys:
+                row_value_dict = data_source.get(row_key, {})
+                row_dict = {}
+                
+                for data_key, mapping_rule in dynamic_mapping_rules.items():
+                    target_id = mapping_rule.get("id")
+                    target_col_idx = column_id_map.get(target_id)
+                    if not target_col_idx: continue
+
+                    value = row_value_dict.get(data_key) # e.g., data_key is "combined_po"
+                    
+                    if value is not None:
+                        # Handle potential string-to-number conversion
+                        if isinstance(value, str):
+                            try:
+                                cleaned_val = value.replace(',', '').strip()
+                                if cleaned_val:
+                                    value = float(cleaned_val) if '.' in cleaned_val else int(cleaned_val)
+                                else:
+                                    value = None
+                            except (ValueError, TypeError):
+                                pass # Keep as string
+                        elif isinstance(value, Decimal):
+                             value = float(value)
+
+                        row_dict[target_col_idx] = value
+
+                data_rows_prepared.append(row_dict)
+
+    # --- Final Processing Steps for all types ---
+    if static_value_map:
+        for row_data in data_rows_prepared:
+            for col_idx, static_val in static_value_map.items():
+                if col_idx not in row_data:
+                    row_data[col_idx] = static_val
+
+    if num_static_labels > len(data_rows_prepared):
+        for _ in range(num_static_labels - len(data_rows_prepared)):
+            data_rows_prepared.append({})
+
+    return data_rows_prepared, pallet_counts_for_rows, dynamic_desc_used, num_data_rows_from_source
 
 
+def parse_mapping_rules(
+    mapping_rules: Dict[str, Any],
+    column_id_map: Dict[str, int],
+    idx_to_header_map: Dict[int, str]
+) -> Dict[str, Any]:
+    """
+    Parses the mapping rules from a standardized, ID-based configuration.
+
+    This function is refined to handle different mapping structures, such as a
+    flat structure for aggregation sheets and a nested 'data_map' for table-based sheets.
+
+    Args:
+        mapping_rules: The raw mapping rules dictionary from the sheet's configuration.
+        column_id_map: A dictionary mapping column IDs to their 1-based column index.
+        idx_to_header_map: A dictionary mapping a column index back to its header text.
+
+    Returns:
+        A dictionary containing all the parsed information required for data filling.
+    """
+    # --- Initialize all return values ---
+    parsed_result = {
+        "static_value_map": {},
+        "initial_static_col1_values": [],
+        "dynamic_mapping_rules": {},
+        "formula_rules": {},
+        "col1_index": -1,
+        "num_static_labels": 0,
+        "static_column_header_name": None,
+        "apply_special_border_rule": False
+    }
+
+    # --- Process all rules in a single, intelligent pass ---
+    for rule_key, rule_value in mapping_rules.items():
+        if not isinstance(rule_value, dict):
+            continue # Skip non-dictionary rules
+
+        # --- Handler for nested 'data_map' (used by 'processed_tables_multi') ---
+        if rule_key == "data_map":
+            # The entire dictionary under "data_map" is our set of dynamic rules.
+            parsed_result["dynamic_mapping_rules"].update(rule_value)
+            continue
+
+        rule_type = rule_value.get("type")
+
+        # --- Handler for Initial Static Rows ---
+        if rule_type == "initial_static_rows":
+            static_column_id = rule_value.get("column_header_id")
+            target_col_idx = column_id_map.get(static_column_id)
+
+            if target_col_idx:
+                parsed_result["static_column_header_name"] = idx_to_header_map.get(target_col_idx)
+                parsed_result["col1_index"] = target_col_idx
+                parsed_result["initial_static_col1_values"] = rule_value.get("values", [])
+                parsed_result["num_static_labels"] = len(parsed_result["initial_static_col1_values"])
+                
+                header_text = parsed_result["static_column_header_name"]
+                parsed_result["apply_special_border_rule"] = header_text and header_text.strip() in ["Mark & Nº", "Mark & N °"]
+            else:
+                print(f"Warning: Initial static rows column with ID '{static_column_id}' not found.")
+            continue
+
+        # For all other rules, get the target column index using the RELIABLE ID
+        target_id = rule_value.get("id")
+        target_col_idx = column_id_map.get(target_id)
+
+        # --- Handler for Formulas ---
+        if rule_type == "formula":
+            if target_col_idx:
+                parsed_result["formula_rules"][target_col_idx] = {
+                    "template": rule_value.get("formula_template"),
+                    "input_ids": rule_value.get("inputs", [])
+                }
+            else:
+                print(f"Warning: Could not find target column for formula rule with id '{target_id}'.")
+
+        # --- Handler for Static Values ---
+        elif "static_value" in rule_value:
+            if target_col_idx:
+                parsed_result["static_value_map"][target_col_idx] = rule_value["static_value"]
+            else:
+                print(f"Warning: Could not find target column for static_value rule with id '{target_id}'.")
+        
+        # --- Handler for top-level Dynamic Rules (used by 'aggregation') ---
+        else:
+            # If it's not a special rule, it's a dynamic mapping rule for the aggregation data type.
+            parsed_result["dynamic_mapping_rules"][rule_key] = rule_value
+            
+    return parsed_result
 
 def fill_invoice_data(
     worksheet: Worksheet,
@@ -939,6 +1164,10 @@ def fill_invoice_data(
     merge_rules_before_footer = merge_rules_before_footer or {}
     merge_rules_footer = merge_rules_footer or {} # Initialize footer merge rules
     mapping_rules = mapping_rules or {}
+    col_id_map = header_info.get('column_id_map', {})
+    column_map = header_info.get('column_map', {})
+    idx_to_header_map = {v: k for k, v in column_map.items()}
+
 
     try:
         data_cell_merging_rules = data_cell_merging_rules or {}
@@ -950,31 +1179,12 @@ def fill_invoice_data(
         # initial_insert_point = header_info['second_row_index'] + 1 # OLD LOGIC
         data_writing_start_row = header_info['second_row_index'] + 1 # Where data *content* begins
  
-        column_map = header_info['column_map']; num_columns = header_info['num_columns']
-        idx_to_header_map = {v: k for k, v in column_map.items()}
-
         # --- Find Description & Pallet Info Column Indices --- (Keep existing)
-        possible_desc_headers = ["Description\ntả hàng hóa","Description", "Description of Goods", "DESCRIPTION OF GOODS", "DESCRIPTION"]
-        desc_col_idx = None
-        for h in possible_desc_headers:
-            for map_key, map_idx in column_map.items():
-                 if isinstance(map_key, str) and map_key.strip().lower() == h.lower(): desc_col_idx = map_idx; break
-            if desc_col_idx is not None: break
-        if desc_col_idx is None: print("Warning: Could not find 'Description' column header.")
-
-        pallet_info_col_idx = column_map.get("Pallet\nNo")
+        desc_col_idx = col_id_map.get("col_desc")
+        pallet_info_col_idx = col_id_map.get("col_pallet")
         if pallet_info_col_idx is None: print("Warning: Header 'Pallet Info' not found.")
 
         # --- ADD/MODIFY THIS PART FOR PALLET INFO INDEX ---
-        possible_pallet_headers = ["Pallet\nNo", "Pallet No", "PALLET\nNO", "PALLETINFO", "Pallet Information", "PALLET\nNO."] # Add other variations as needed
-        pallet_info_col_idx = None
-        for h_pallet in possible_pallet_headers:
-            for map_key_pallet, map_idx_pallet in column_map.items():
-                if isinstance(map_key_pallet, str) and map_key_pallet.strip().lower() == h_pallet.lower():
-                    pallet_info_col_idx = map_idx_pallet
-                    break
-            if pallet_info_col_idx is not None:
-                break
         if pallet_info_col_idx is None:
             print("Warning: Could not find a 'Pallet Info' (e.g., 'Pallet\\nNo') column header.")
         # --- END OF ADDITION/MODIFICATION FOR PALLET INFO INDEX ---
@@ -985,10 +1195,10 @@ def fill_invoice_data(
         effective_header_align = center_alignment # Start with default
 
         if sheet_styling_config:
-            columns_to_grid = sheet_styling_config.get("columns_with_full_grid", [])
+            columns_to_grid = sheet_styling_config.get("column_ids_with_full_grid", [])
             if not isinstance(columns_to_grid, list): columns_to_grid = []
 
-            force_text_headers = sheet_styling_config.get("force_text_format_headers", [])
+            force_text_headers = sheet_styling_config.get("force_text_format_ids", [])
             if not isinstance(force_text_headers, list): force_text_headers = []
 
             header_font_cfg = sheet_styling_config.get("header_font")
@@ -1016,357 +1226,43 @@ def fill_invoice_data(
                      except Exception as align_err: # Catch other potential errors
                           print(f"Warning: Error applying header_alignment config: {align_err}. Using default.")
                           pass # Keep default alignment on error
+        parsed_rules = parse_mapping_rules(
+            mapping_rules=mapping_rules,
+            column_id_map=col_id_map,
+            idx_to_header_map=idx_to_header_map
+        )
 
-        # --- Prepare Data Mapping Rules (Separate Static, Initial Static, Dynamic, and **FORMULA**) ---
-        static_value_map = {}; initial_static_col1_values = []; dynamic_mapping_rules = {}; initial_static_rule = None
-        # This dictionary will store rules specifically marked as "type": "formula" in the config.
-        # Keys will be the target column index, values will contain the template and input headers.
-        formula_rules = {}
-
-        # First pass: find the initial static rule (Keep existing)
-        for rule_key, rule_value in mapping_rules.items():
-            if isinstance(rule_value, dict) and rule_value.get("type") == "initial_static_rows":
-                 initial_static_rule = rule_value; static_column_header_name = initial_static_rule.get("column_header")
-                 target_col_idx = column_map.get(static_column_header_name) if static_column_header_name else None
-                 if target_col_idx: col1_index = target_col_idx; initial_static_col1_values = initial_static_rule.get("values", []); num_static_labels = len(initial_static_col1_values)
-                 else: print(f"Warning: Initial static rows column '{static_column_header_name}' not found.")
-                 break
-
-        # Second pass: separate static, dynamic, and formula rules
-        for rule_key, rule_value in mapping_rules.items():
-            if isinstance(rule_value, dict):
-                rule_type = rule_value.get("type")
-                header_text = rule_value.get("header")
-                target_col_idx = column_map.get(header_text) if header_text else None
-
-                if rule_type == "initial_static_rows": continue # Skip the one found above
-                if 'marker' in rule_value: continue # Skip summary field markers
-
-                # --- Formula Rule Processing ---
-                # If a mapping rule in the config has "type": "formula", store its details
-                # (template string and list of input header names) keyed by the target column index.
-                if rule_type == "formula":
-                    if target_col_idx:
-                        formula_template = rule_value.get("formula_template")
-                        input_headers = rule_value.get("inputs")
-                        if formula_template and isinstance(input_headers, list):
-                            formula_rules[target_col_idx] = {
-                                "template": formula_template,
-                                "input_headers": input_headers
-                            }
-                            print(f"DEBUG: Parsed formula rule for header '{header_text}' (Col {target_col_idx})")
-                        else:
-                            print(f"Warning: Invalid formula rule for header '{header_text}'. Missing template or inputs.")
-                    else:
-                        print(f"Warning: Could not find target column for formula rule with header '{header_text}'.")
-                # --- End Formula Rule Processing ---
-
-                elif "static_value" in rule_value: # Existing static value logic
-                    if target_col_idx: static_value_map[target_col_idx] = rule_value["static_value"]
-                else: # Existing dynamic rule logic (dict without static_value and not formula)
-                    dynamic_mapping_rules[rule_key] = rule_value
-            else: # Existing simple string mapping (dynamic)
-                dynamic_mapping_rules[rule_key] = rule_value
-
-        apply_special_border_rule = static_column_header_name and static_column_header_name.strip() in ["Mark & Nº", "Mark & N °"]
+        # Unpack the results into local variables for the rest of the function to use
+        static_value_map = parsed_rules["static_value_map"]
+        initial_static_col1_values = parsed_rules["initial_static_col1_values"]
+        dynamic_mapping_rules = parsed_rules["dynamic_mapping_rules"]
+        formula_rules = parsed_rules["formula_rules"]
+        col1_index = parsed_rules["col1_index"]
+        num_static_labels = parsed_rules["num_static_labels"]
+        static_column_header_name = parsed_rules["static_column_header_name"]
+        apply_special_border_rule = parsed_rules["apply_special_border_rule"]
 
         # --- Prepare Data Rows for Writing (Determine number of rows needed from source) ---
         # This section remains largely the same, preparing the `data_rows_prepared` list
         # which holds the *input* data, not the calculated formulas.
-        num_data_rows_from_source = 0
-        pallet_counts_for_rows = []
+        desc_col_idx = col_id_map.get("col_desc") # Get the description column index
+        data_rows_prepared, pallet_counts_for_rows, dynamic_desc_used, num_data_rows_from_source = prepare_data_rows(
+            data_source_type=data_source_type,
+            data_source=data_source,
+            dynamic_mapping_rules=dynamic_mapping_rules,
+            column_id_map=col_id_map,
+            idx_to_header_map=idx_to_header_map,
+            desc_col_idx=desc_col_idx,
+            num_static_labels=num_static_labels,
+            static_value_map=static_value_map
+        )
+# --- Determine Final Number of Data Rows ---
+# The number of rows to process is the greater of the number of data rows or static labels.
+        actual_rows_to_process = max(len(data_rows_prepared), num_static_labels)
 
-        if data_source_type == 'processed_tables':
-            # ... (Keep existing logic for processed_tables data preparation) ...
-            # Ensure 'pallet_count' logic is still correct here.
-            # The special Description fallback logic also remains here.
-             data_source = data_source or {}; max_len = 0
-             if isinstance(data_source, dict):
-                 for value in data_source.values():
-                     if isinstance(value, list): max_len = max(max_len, len(value))
-                 num_data_rows_from_source = max_len
-                 raw_pallet_counts = data_source.get("pallet_count", [])
-                 if isinstance(raw_pallet_counts, list): pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts))
-                 else: pallet_counts_for_rows = [0] * max_len; print("Warning: 'pallet_count' key missing...")
-                 if num_data_rows_from_source > 0:
-                     for i in range(num_data_rows_from_source):
-                         row_dict = {}
-                         # Iterate through dynamic rules (which map json keys to headers/rules)
-                         for json_key, header_or_rule in dynamic_mapping_rules.items():
-                             target_col_idx = None
-                             data_value_from_source = None # Store original value
-                             effective_value_to_write = None # Final value after fallback
-                             is_description_column = False
-                             mapping_rule = None # Store the specific rule dict if applicable
-
-                             # --- Determine Target Column and Mapping Rule --- #
-                             if isinstance(header_or_rule, str):
-                                 # Simple case: Rule is just the header text
-                                 header_text = header_or_rule
-                                 target_col_idx = column_map.get(header_text)
-                                 # Need to find the corresponding rule dict for fallback
-                                 for r_key, r_val in mapping_rules.items():
-                                     if isinstance(r_val, dict) and r_val.get("header") == header_text:
-                                         mapping_rule = r_val
-                                         break
-                             elif isinstance(header_or_rule, dict) and "static_value" not in header_or_rule and header_or_rule.get("type") != "formula":
-                                 # Complex case: Rule is a dictionary
-                                 header_text = header_or_rule.get("header")
-                                 target_col_idx = column_map.get(header_text) if header_text else None
-                                 mapping_rule = header_or_rule # The rule is directly available
-
-                             # --- Get Value from Source Data --- #
-                             if target_col_idx:
-                                 source_list = data_source.get(json_key)
-                                 if isinstance(source_list, list) and i < len(source_list):
-                                     data_value_from_source = source_list[i]
-                                 is_description_column = (target_col_idx == desc_col_idx)
-
-                                 # --- Determine Effective Value (Apply Fallback) --- #
-                                 effective_value_to_write = None # Initialize
-                                 value_was_determined = False # Flag to track if any value (even None) was explicitly determined
-
-                                 # Check if source value is considered "empty" (None or whitespace string)
-                                 is_empty_source_value = (data_value_from_source is None or 
-                                                         (isinstance(data_value_from_source, str) and not data_value_from_source.strip()))
-
-                                 if not is_empty_source_value:
-                                     effective_value_to_write = data_value_from_source
-                                     value_was_determined = True
-                                     if is_description_column: dynamic_desc_used = True # Mark if actual data used for description
-                                 else:
-                                     # Source value is empty, try fallback
-                                     fallback_value = None
-                                     if mapping_rule and isinstance(mapping_rule, dict):
-                                         # Use .get() which returns None if key doesn't exist
-                                         fallback_value = mapping_rule.get("fallback_on_none")
-                                     
-                                     if fallback_value is not None: # Check if fallback *exists*
-                                         effective_value_to_write = fallback_value
-                                         value_was_determined = True
-                                         # If description uses fallback, don't mark dynamic_desc_used
-                                     elif is_description_column:
-                                         # Last resort for description: check static_value_map
-                                         static_map_value = static_value_map.get(target_col_idx)
-                                         if static_map_value is not None: # Check if static value exists
-                                             effective_value_to_write = static_map_value
-                                             value_was_determined = True
-                                     # else: effective_value_to_write remains None for other columns if no fallback
-                                     # and value_was_determined remains False
-
-                                 # --- Add the key to the row dictionary if a value was determined --- #
-                                 # This ensures the key exists even if the determined value is None or ""
-                                 if value_was_determined:
-                                     row_dict[target_col_idx] = effective_value_to_write
-                             # else: target_col_idx not found for this rule, skip
-
-                         # --- Ensure Description column exists even if all sources/fallbacks were None --- #
-                         # This check might be less necessary now but acts as a final safety net
-                         if desc_col_idx is not None and desc_col_idx not in row_dict:
-                             # Check mapping rules again for the description column specifically
-                             final_fallback_desc = None
-                             desc_header = idx_to_header_map.get(desc_col_idx)
-                             if desc_header:
-                                 for rule in mapping_rules.values():
-                                     if isinstance(rule, dict) and rule.get('header') == desc_header:
-                                         final_fallback_desc = rule.get('fallback_on_none')
-                                         if final_fallback_desc is None:
-                                             final_fallback_desc = rule.get('static_value')
-                                         break # Found rule
-                             # If still nothing, check static map (original fallback)
-                             if final_fallback_desc is None:
-                                 final_fallback_desc = static_value_map.get(desc_col_idx)
-
-                             # Add to dict ONLY if a final fallback was actually found
-                             if final_fallback_desc is not None:
-                                 row_dict[desc_col_idx] = final_fallback_desc
-
-                         # Append the prepared row data
-                         if row_dict or i < num_static_labels: # Keep row if it has data OR it's for an initial static label
-                            data_rows_prepared.append(row_dict)
-                         elif i >= num_static_labels: # Only append empty dict if past static labels and row is truly empty
-                            data_rows_prepared.append({}) 
-
-        elif data_source_type == 'aggregation':
-            # ... (Keep existing logic for aggregation data preparation) ...
-            # Ensure fallback logic is correct.
-            # Pallet count assumption remains.
-             print("Warning: Pallet count per row is assumed '1' for 'aggregation' data source type.")
-             num_data_rows_from_source = len(data_source) if isinstance(data_source, dict) else 0
-             pallet_counts_for_rows = [1] * num_data_rows_from_source # Assume 1 pallet
-             if num_data_rows_from_source > 0 and isinstance(data_source, dict):
-                 row_counter = 0
-                 for key_tuple, value_dict in data_source.items():
-                     row_dict = {}
-                     for map_key, map_rule in dynamic_mapping_rules.items():
-                         if not isinstance(map_rule, dict) or 'static_value' in map_rule or 'marker' in map_rule or map_rule.get("type") in ["initial_static_rows", "formula"]: continue # Exclude formula rules here
-                         header_text = map_rule.get('header'); target_col_index = column_map.get(header_text) if header_text else None;
-                         if not target_col_index: continue
-                         data_value = None; original_value_is_none = True
-                         try:
-                             if 'key_index' in map_rule:
-                                 key_index = map_rule['key_index']
-                                 if isinstance(key_tuple, tuple) and isinstance(key_index, int) and 0 <= key_index < len(key_tuple):
-                                     data_value = key_tuple[key_index]; original_value_is_none = (data_value is None)
-                                     if original_value_is_none and "fallback_on_none" in map_rule: data_value = map_rule["fallback_on_none"]
-                                 elif "fallback_on_none" in map_rule: data_value = map_rule["fallback_on_none"]
-                             elif 'value_key' in map_rule:
-                                 value_key = map_rule['value_key']
-                                 if isinstance(value_dict, dict) and value_key in value_dict:
-                                     data_value = value_dict[value_key]; original_value_is_none = (data_value is None)
-                         except Exception as e: pass
-                         if data_value is not None:
-                             row_dict[target_col_index] = data_value
-                             if target_col_index == desc_col_idx and not original_value_is_none: dynamic_desc_used = True
-                     for static_col_idx, static_val in static_value_map.items():
-                         if static_col_idx not in row_dict: row_dict[static_col_idx] = static_val
-                     if row_dict or row_counter < num_static_labels: data_rows_prepared.append(row_dict)
-                     else: data_rows_prepared.append({})
-                     row_counter += 1
-
-                     # --- Custom Aggregation Amount Override (Before Appending) ---
-                     # This block overrides the standard mapping for Amount if custom_flag is true
-                     if custom_flag:
-                         print(f"DEBUG: Custom flag True. Overriding Amount for aggregation row {row_counter}.")
-                         # Find Amount column index
-                         amount_col_idx_override = None
-                         amount_headers_override = ["Amount ( USD )", "Total value(USD)", "amount", "amount_sum", "Amount(USD)"]
-                         for header, col_idx in column_map.items():
-                             if str(header).lower() in [h.lower() for h in amount_headers_override]:
-                                 amount_col_idx_override = col_idx
-                                 break
-
-                         # Get amount_sum from the value dictionary
-                         amount_sum_value = None
-                         if isinstance(value_dict, dict):
-                             amount_sum_value = value_dict.get("amount_sum")
-
-                         if amount_col_idx_override and amount_sum_value is not None:
-                             print(f"DEBUG: Custom Override - Found Amount Col: {amount_col_idx_override}, Amount Sum: {amount_sum_value}")
-                             # Convert to float for consistency before writing
-                             try:
-                                 amount_float = float(str(amount_sum_value).replace(',', ''))
-                                 row_dict[amount_col_idx_override] = amount_float # Overwrite the mapped value
-                                 print(f"DEBUG: Custom Override - Updated row_dict[{amount_col_idx_override}] = {amount_float}")
-                             except (ValueError, TypeError) as e:
-                                 print(f"Warning: Custom Override - Could not convert amount_sum '{amount_sum_value}' to float: {e}. Keeping original mapped value if any.")
-                         else:
-                             missing_info = []
-                             if not amount_col_idx_override: missing_info.append("Amount column in header map")
-                             if amount_sum_value is None: missing_info.append('"amount_sum" key in data value')
-                             print(f"Warning: Custom Override - Skipping amount override. Missing: {', '.join(missing_info)}")
-                     # --- End Custom Aggregation Amount Override ---
-
-        elif data_source_type == 'fob_aggregation':
-            # --- FOB Aggregation Data Prep (Revised for Nested Dict) ---
-            # Prepare data_rows_prepared based on the new structure.
-            # Also find initial static labels.
-            num_static_labels = 0
-            initial_static_col1_values = []
-            col1_index = 1 # Default
-            static_column_header_name = None
-            data_rows_prepared = [] # Initialize here for FOB
-
-            # Find initial static rule (same as before)
-            for rule_key, rule_value in mapping_rules.items():
-                if isinstance(rule_value, dict) and rule_value.get("type") == "initial_static_rows":
-                    static_column_header_name = rule_value.get("column_header")
-                    target_col_idx = column_map.get(static_column_header_name) if static_column_header_name else None
-                    if target_col_idx:
-                        col1_index = target_col_idx
-                        initial_static_col1_values = rule_value.get("values", [])
-                        num_static_labels = len(initial_static_col1_values)
-                    break # Assume only one such rule
-
-            print(f"DEBUG: FOB Mode - Found {num_static_labels} initial static labels configured.")
-
-            # Prepare data rows from the nested data_source dictionary
-            if data_source and isinstance(data_source, dict):
-                fob_data_keys = { # Mapping from Sheet Header -> Data Source Key
-                    'P.O N °': 'combined_po', 'P.O Nº': 'combined_po', 'P.ON°': 'combined_po',
-                    'ITEM NO': 'combined_item', 'ITEM Nº': 'combined_item' , 'ITEM N°': 'combined_item', 'Name of Cormodity': 'combined_item',
-                    "Name of\nCormodity": "combined_item",
-                    'Quantity ( SF )': 'total_sqft', 'Quantity(SF)': 'total_sqft', "Quantity(SF)": 'total_sqft', "Unit Price(USD)": 'unit_price',
-                    'Amount ( USD )': 'total_amount', 'Total value(USD)': 'total_amount', "P.O Nº": "combined_po", "P.O N°": "combined_po",
-                    "Quantity\n(SF)": 'total_sqft', "Amount(USD)": 'total_amount', "Description Of Goods": "combined_item",
-                }
-                desc_header_options = ["Description", "DESCRIPTION OF GOODS", "Description of Goods", "DESCRIPTION"]
-                desc_col_idx_fob_prep = None
-                for header in desc_header_options:
-                    desc_col_idx_fob_prep = column_map.get(header)
-                    if desc_col_idx_fob_prep: break
-
-                # Sort by key to ensure order ("1", "2", ...)
-                sorted_keys = sorted(data_source.keys(), key=lambda k: int(k) if k.isdigit() else float('inf'))
-
-                for row_key in sorted_keys:
-                    row_value_dict = data_source[row_key]
-                    if not isinstance(row_value_dict, dict): continue # Skip invalid entries
-
-                    row_dict = {}
-                    # Map defined keys
-                    for header_in_sheet, data_key in fob_data_keys.items():
-                        target_col_idx = column_map.get(header_in_sheet)
-                        if target_col_idx:
-                            value = row_value_dict.get(data_key)
-                            # Handle potential string numbers
-                            if isinstance(value, str):
-                                try:
-                                    cleaned_val = value.replace(',', '').strip()
-                                    if cleaned_val: # Avoid converting empty string
-                                        if '.' in cleaned_val or 'e' in cleaned_val.lower(): value = float(cleaned_val)
-                                        else: value = int(cleaned_val)
-                                    else: value = None # Treat empty string as None/blank
-                                except (ValueError, TypeError): pass # Keep as string if conversion fails
-                            elif isinstance(value, Decimal): value = float(value)
-
-                            row_dict[target_col_idx] = value
-
-                    # Handle Description with fallback
-                    if desc_col_idx_fob_prep:
-                        desc_value_fob = row_value_dict.get('combined_description')
-                        # Fallback if empty/None
-                        if desc_value_fob is None or not str(desc_value_fob).strip():
-                            desc_header_text = idx_to_header_map.get(desc_col_idx_fob_prep)
-                            if desc_header_text:
-                                for map_rule in mapping_rules.values():
-                                    if isinstance(map_rule, dict) and map_rule.get('header') == desc_header_text:
-                                        fallback = map_rule.get('fallback_on_none')
-                                        if fallback is None: fallback = map_rule.get('static_value')
-                                        if fallback is not None: desc_value_fob = fallback
-                                        break # Found rule
-                        row_dict[desc_col_idx_fob_prep] = desc_value_fob
-
-                    # Add static values not already populated
-                    for static_col_idx, static_val in static_value_map.items():
-                         if static_col_idx not in row_dict: row_dict[static_col_idx] = static_val
-
-                    data_rows_prepared.append(row_dict)
-                print(f"DEBUG: FOB Mode - Prepared {len(data_rows_prepared)} data rows.")
-            else:
-                 print(f"Warning: FOB Mode - data_source is not a valid dictionary.")
-
-            # Note: Pallet count logic needs review based on how FOB data relates to pallets.
-            # For now, we'll assume 0 pallets per row for FOB in row-level calculations.
-            pallet_counts_for_rows = [0] * len(data_rows_prepared)
-
-        else:
-            print(f"Error: Unknown data_source_type '{data_source_type}'")
-            return False, data_writing_start_row, -1, -1, 0 # Use data_writing_start_row
-
-        # --- Determine Final Number of Data Rows ---
-        if data_source_type == 'fob_aggregation':
-            # FOB mode: Number of prepared data rows + number of initial static labels
-            # actual_rows_to_process = len(data_rows_prepared) + num_static_labels # OLD logic
-            # Revised FOB logic: Process rows for the MAX of static labels or data rows
-            actual_rows_to_process = max(len(data_rows_prepared), num_static_labels)
-        else:
-            # Standard modes: Based on prepared data or static labels
-            total_data_rows_needed = max(len(data_rows_prepared), num_static_labels)
-            actual_rows_to_process = total_data_rows_needed
-
-        # Apply max_rows_to_fill constraint (only relevant for non-FOB modes typically)
-        if max_rows_to_fill is not None and max_rows_to_fill >= 0: actual_rows_to_process = min(total_data_rows_needed, max_rows_to_fill)
+        # Optional: Apply max_rows_to_fill constraint if it exists
+        if max_rows_to_fill is not None and max_rows_to_fill >= 0:
+            actual_rows_to_process = min(actual_rows_to_process, max_rows_to_fill)
 
         # Ensure pallet counts list matches the number of rows we intend to process
         if len(pallet_counts_for_rows) < actual_rows_to_process: pallet_counts_for_rows.extend([0] * (actual_rows_to_process - len(pallet_counts_for_rows)))
@@ -1936,7 +1832,6 @@ def fill_invoice_data(
         # written in the data rows above.
         total_value_config = sheet_config.get("total_footer_text")
         if footer_row_final > 0:
-             # <<< Add this line >>>
              unmerge_row(worksheet, footer_row_final, num_columns) # Ensure footer row is clear before writing
              try:
                  palletNo_col_inx = None

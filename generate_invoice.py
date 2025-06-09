@@ -135,7 +135,7 @@ def load_config(config_path: Path) -> Optional[Dict[str, Any]]:
         print("Configuration loaded successfully.")
         if not isinstance(config_data, dict): print("Error: Config file is not a valid JSON object."); return None
         # Basic validation (add checks for 'styling' if required globally, but usually per-sheet)
-        required_keys = ['sheets_to_process', 'sheet_data_map', 'footer_rules', 'data_mapping']
+        required_keys = ['sheets_to_process', 'sheet_data_map', 'data_mapping']
         missing_keys = [key for key in required_keys if key not in config_data]
         if missing_keys: print(f"Error: Config file missing required keys: {', '.join(missing_keys)}"); return None
         if not isinstance(config_data.get('data_mapping'), dict): print(f"Error: 'data_mapping' section is not a valid dictionary."); return None
