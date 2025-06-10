@@ -1,0 +1,110 @@
+{
+    "metadata": {
+        "workbook_filename": "JF.xlsx",
+        "worksheet_name": "Sheet1",
+        "fob_compounding_input_mode": "standard",
+        "fob_chunk_size": 2,
+        "fob_intra_separator": "/",
+        "fob_inter_separator": "\\n",
+        "timestamp": "2025-06-10T08:35:10.228083"
+    },
+    "processed_tables_data": {
+        "1": {
+            "po": [
+                "YNGY25022",
+                "YNGY25028",
+                "YNGY25028",
+                "YNGY25028"
+            ],
+            "reference_code": [
+                "XZDY-FT-\u7070513",
+                "XZDY-FT-\u7070513",
+                "XZDY-FT-\u7070513",
+                "XZDY-FT-\u7070513"
+            ],
+            "item": [
+                "M1243",
+                "M1243",
+                "M1243",
+                "M1243"
+            ],
+            "pcs": [
+                195,
+                215,
+                210,
+                210
+            ],
+            "sqft": [
+                10045.4,
+                11181.6,
+                10982.8,
+                11087.8
+            ],
+            "pallet_count": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "unit": [
+                1.14,
+                1.14,
+                1.14,
+                1.14
+            ],
+            "amount": [
+                11451.756,
+                12747.024,
+                12520.391999999998,
+                12640.091999999999
+            ],
+            "net": [
+                "759",
+                "842",
+                "821.5",
+                "833.5"
+            ],
+            "gross": [
+                "804",
+                "887",
+                "866.5",
+                "878.5"
+            ],
+            "cbm": [
+                "2.4948",
+                "2.7720",
+                "2.6532",
+                "2.8512"
+            ]
+        }
+    },
+    "standard_aggregation_results": {
+        "('YNGY25022', 'M1243', Decimal('1.14'), None)": {
+            "sqft_sum": "10045.4",
+            "amount_sum": "11451.756"
+        },
+        "('YNGY25028', 'M1243', Decimal('1.14'), None)": {
+            "sqft_sum": "33252.2",
+            "amount_sum": "37907.507999999997"
+        }
+    },
+    "custom_aggregation_results": {
+        "('YNGY25022', 'M1243', None, None)": {
+            "sqft_sum": "10045.4",
+            "amount_sum": "11451.756"
+        },
+        "('YNGY25028', 'M1243', None, None)": {
+            "sqft_sum": "33252.2",
+            "amount_sum": "37907.507999999997"
+        }
+    },
+    "final_fob_compounded_result": {
+        "1": {
+            "combined_po": "YNGY25022/YNGY25028",
+            "combined_item": "M1243",
+            "combined_description": "",
+            "total_sqft": "43297.6",
+            "total_amount": "49359.263999999997"
+        }
+    }
+}

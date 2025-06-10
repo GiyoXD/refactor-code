@@ -245,183 +245,44 @@ def apply_row_merges(worksheet: Worksheet, row_num: int, num_cols: int, merge_ru
             # Log or handle other merge errors
             pass
 
-def _apply_cell_style(cell, column_header: Optional[str], sheet_styling_config: Optional[Dict[str, Any]]):
+def _apply_cell_style(cell, column_id: Optional[str], sheet_styling_config: Optional[Dict[str, Any]]):
     """
-    Applies font, alignment, and number format to a cell based on default and column-specific rules.
-    Respects explicitly set Text format.
+    Applies font, alignment, and number format to a cell based on a column ID.
     """
-    if not sheet_styling_config or not cell:
-        return # No styling config or invalid cell
+    if not sheet_styling_config or not cell or not column_id:
+        return
 
     try:
-        # --- Get Styling Configurations ---
+        # Get styling configurations using ID-based keys
         default_font_cfg = sheet_styling_config.get("default_font", {})
         default_align_cfg = sheet_styling_config.get("default_alignment", {})
-        column_styles = sheet_styling_config.get("column_styles", {})
+        column_styles = sheet_styling_config.get("column_id_styles", {}) # <-- Uses "column_id_styles"
 
-        # Find column-specific style rules if the header matches
-        col_specific_style = {}
-        if column_header and isinstance(column_styles, dict):
-            col_specific_style = column_styles.get(column_header, {})
+        # Find column-specific style rules if the ID matches
+        col_specific_style = column_styles.get(column_id, {})
 
-        # Extract font, alignment, and number format from column-specific rules (if they exist)
-        col_font_cfg = col_specific_style.get("font", {}) if isinstance(col_specific_style, dict) else {}
-        col_align_cfg = col_specific_style.get("alignment", {}) if isinstance(col_specific_style, dict) else {}
-        number_format = col_specific_style.get("number_format") if isinstance(col_specific_style, dict) else None
-
-        # --- Apply Font --- # RESTORED
-        final_font_cfg = default_font_cfg.copy() if isinstance(default_font_cfg, dict) else {}
-        if isinstance(col_font_cfg, dict): final_font_cfg.update(col_font_cfg) # Overwrite defaults
+        # --- Apply Font ---
+        final_font_cfg = default_font_cfg.copy()
+        final_font_cfg.update(col_specific_style.get("font", {}))
         if final_font_cfg:
-            font_params = {k: v for k, v in final_font_cfg.items() if v is not None}
-            if font_params:
-                try: cell.font = Font(**font_params)
-                except TypeError as e: pass # Ignore invalid font parameters
-                except Exception as e_font: pass # Log other font errors?
+            cell.font = Font(**{k: v for k, v in final_font_cfg.items() if v is not None})
 
-        # --- Apply Alignment --- 
-        # --- Apply Font --- # V12: IGNORED TO PRESERVE EXPLICITLY SET FONT (e.g., for footers)
-        # final_font_cfg = default_font_cfg.copy() if isinstance(default_font_cfg, dict) else {}
-        # if isinstance(col_font_cfg, dict): final_font_cfg.update(col_font_cfg) # Overwrite defaults
-        # if final_font_cfg:
-        #     font_params = {k: v for k, v in final_font_cfg.items() if v is not None}
-        #     if font_params:
-        #         try: cell.font = Font(**font_params)
-        #         except TypeError as e: pass # Ignore invalid font parameters
-        #         except Exception as e_font: pass # Log other font errors?
-
-        # --- Apply Alignment --- 
-        final_align_cfg = default_align_cfg.copy() if isinstance(default_align_cfg, dict) else {}
-        if isinstance(col_align_cfg, dict): final_align_cfg.update(col_align_cfg) # Overwrite defaults
+        # --- Apply Alignment ---
+        final_align_cfg = default_align_cfg.copy()
+        final_align_cfg.update(col_specific_style.get("alignment", {}))
         if final_align_cfg:
-            align_params = {k: v for k, v in final_align_cfg.items() if v is not None}
-            if align_params:
-                try: cell.alignment = Alignment(**align_params)
-                except TypeError as e: pass # Ignore invalid alignment parameters
-                except Exception as e_align: pass # Log other alignment errors?
-        # --- Apply Number Format (Respecting Explicit Text Format) ---
-        # Only apply number format if one is specified AND the cell format isn't already set to Text ('@')
+            cell.alignment = Alignment(**{k: v for k, v in final_align_cfg.items() if v is not None})
+            
+        # --- Apply Number Format ---
+        number_format = col_specific_style.get("number_format")
         if number_format and cell.number_format != FORMAT_TEXT:
-            try: cell.number_format = number_format
-            except Exception as e_num_fmt: pass # Log number format errors?
-        # Apply default number formats only if not Text and not already set by specific rule
+            cell.number_format = number_format
         elif cell.number_format != FORMAT_TEXT and (cell.number_format == FORMAT_GENERAL or cell.number_format is None):
             if isinstance(cell.value, float): cell.number_format = FORMAT_NUMBER_COMMA_SEPARATED2
             elif isinstance(cell.value, int): cell.number_format = FORMAT_NUMBER_COMMA_SEPARATED1
-            # No explicit else needed, keep General or existing format otherwise
 
     except Exception as style_err:
-        print(f"Error applying cell style: {style_err} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        # Log general styling errors?
-        pass
-
-
-def find_header(worksheet: Worksheet, header_rules: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Finds the header rows in a worksheet based on marker text and rules.
-    Deprecated in favor of write_header for more control, but kept for potential legacy use.
-
-    Args:
-        worksheet: The openpyxl Worksheet object.
-        header_rules: Dictionary defining how to find the header (markers, rows, logic).
-
-    Returns:
-        A dictionary containing header info (row indices, column map, num columns) or None if not found.
-    """
-    # --- DEPRECATED ---
-    print("Warning: find_header is deprecated. Use write_header for better control.")
-    markers = header_rules.get('markers', [])
-    num_header_rows = header_rules.get('num_header_rows', 1)
-    max_row_search = header_rules.get('max_row_to_search', worksheet.max_row)
-    find_logic = header_rules.get('find_logic', 'or').lower() # 'or' or 'and'
-    if not markers: return None
-    if num_header_rows not in [1, 2]: return None
-
-    first_row_index = -1; second_row_index = -1; num_columns = 0; column_map = {}
-    try:
-        # Find First Header Row
-        for r_idx in range(1, min(max_row_search, worksheet.max_row) + 1):
-            found_marker_in_row = False; markers_found_in_row = 0
-            for marker_rule in markers:
-                col_idx = marker_rule.get('column'); text_to_find = marker_rule.get('text')
-                search_type = marker_rule.get('search_type', 'exact'); case_sensitive = marker_rule.get('case_sensitive', True)
-                if not col_idx or text_to_find is None: continue
-                try: cell = worksheet.cell(row=r_idx, column=col_idx); cell_value_str = str(cell.value) if cell.value is not None else ""
-                except IndexError: continue
-                found = False; text_to_find_str = str(text_to_find)
-                if search_type == 'substring':
-                    pattern = re.escape(text_to_find_str); flags = 0 if case_sensitive else re.IGNORECASE
-                    if re.search(pattern, cell_value_str, flags): found = True
-                elif case_sensitive and cell_value_str == text_to_find_str: found = True
-                elif not case_sensitive and cell_value_str.lower() == text_to_find_str.lower(): found = True
-                if found: found_marker_in_row = True; markers_found_in_row += 1;
-                if find_logic == 'or': break
-            if (find_logic == 'or' and found_marker_in_row) or (find_logic == 'and' and markers_found_in_row == len(markers)):
-                first_row_index = r_idx; break
-        if first_row_index == -1: return None
-
-        # Determine Second Header Row
-        if num_header_rows == 2:
-            second_row_index = first_row_index + 1
-            if second_row_index > worksheet.max_row: second_row_index = first_row_index # Fallback if at last row
-            else: pass
-        else: second_row_index = first_row_index
-
-        # Determine Header Width (find last non-empty cell in the first header row)
-        num_columns = 0
-        for c_idx in range(worksheet.max_column, 0, -1):
-            try:
-                cell_val = worksheet.cell(row=first_row_index, column=c_idx).value
-                if cell_val is not None and str(cell_val).strip() != "":
-                    num_columns = c_idx
-                    break
-            except IndexError:
-                continue # Skip if column index is out of bounds for this row
-        if num_columns == 0: # Fallback if row is empty or error
-            num_columns = worksheet.max_column
-        pass
-
-        # Build Column Map (Handle potential multi-row headers like "Quantity" -> "PCS", "SF")
-        column_map = {}; header_row_1_vals = [worksheet.cell(row=first_row_index, column=c).value for c in range(1, num_columns + 1)];
-        header_row_2_vals = []
-        if num_header_rows == 2: header_row_2_vals = [worksheet.cell(row=second_row_index, column=c).value for c in range(1, num_columns + 1)]
-        quantity_header_text = "Quantity"; sub_col_1_text = "PCS"; sub_col_2_text = "SF"; quantity_col_idx = -1
-        if num_header_rows == 2:
-            try: quantity_col_idx = header_row_1_vals.index(quantity_header_text) # Find 0-based index
-            except (ValueError, TypeError): quantity_col_idx = -1
-        for c_idx_0based in range(num_columns):
-            col_index_1based = c_idx_0based + 1; header_text = None
-            val_row1 = header_row_1_vals[c_idx_0based] if c_idx_0based < len(header_row_1_vals) else None
-            val_row2 = header_row_2_vals[c_idx_0based] if c_idx_0based < len(header_row_2_vals) else None
-            # Special handling for Quantity -> PCS/SF split
-            if num_header_rows == 2 and quantity_col_idx != -1:
-                if c_idx_0based == quantity_col_idx: # This is the PCS column
-                    pcs_val = val_row2
-                    if pcs_val is not None and str(pcs_val).strip() == sub_col_1_text: header_text = sub_col_1_text
-                    else: header_text = quantity_header_text # Fallback if row 2 isn't PCS
-                    # Check the *next* column in row 2 for SF
-                    sf_col_index_0based = c_idx_0based + 1
-                    if sf_col_index_0based < len(header_row_2_vals):
-                        sf_val = header_row_2_vals[sf_col_index_0based]
-                        if sf_val is not None and str(sf_val).strip() == sub_col_2_text:
-                            column_map[sub_col_2_text] = col_index_1based + 1 # Map SF to the *next* column index
-                    # Add the determined header (PCS or Quantity) to the map for the *current* column
-                    if header_text: clean_header = str(header_text).strip();
-                    if clean_header and clean_header not in column_map: column_map[clean_header] = col_index_1based
-                    continue # Move to next column index
-                elif c_idx_0based == quantity_col_idx + 1: # This is potentially the SF column
-                    # If SF was already mapped in the previous step, skip this column
-                    if sub_col_2_text in column_map and column_map[sub_col_2_text] == col_index_1based: continue
-            # General case: Use row 2 if available, else row 1
-            if num_header_rows >= 2 and val_row2 is not None and str(val_row2).strip() != "": header_text = str(val_row2).strip()
-            elif val_row1 is not None and str(val_row1).strip() != "": header_text = str(val_row1).strip()
-            # Add to map if a valid header text was found and not already mapped
-            if header_text: clean_header = str(header_text).strip();
-            if clean_header and clean_header not in column_map: column_map[clean_header] = col_index_1based
-        if not column_map: return None # No valid headers found
-
-        return {'first_row_index': first_row_index, 'second_row_index': second_row_index, 'column_map': column_map, 'num_columns': num_columns}
-    except Exception as e: return None
+        print(f"Error applying cell style for ID {column_id}: {style_err}")
 
 
 def write_header(worksheet: Worksheet, start_row: int, header_layout_config: List[Dict[str, Any]],
@@ -538,6 +399,42 @@ def write_header(worksheet: Worksheet, start_row: int, header_layout_config: Lis
         print(f"Error in write_header during layout processing: {e}")
         traceback.print_exc()
         return None
+def merge_contiguous_cells_by_id(
+    worksheet: Worksheet,
+    start_row: int,
+    end_row: int,
+    col_id_to_merge: str,
+    column_id_map: Dict[str, int]
+):
+    """
+    Finds and merges contiguous vertical cells within a column that have the same value.
+    This is called AFTER all data has been written to the sheet.
+    """
+    col_idx = column_id_map.get(col_id_to_merge)
+    if not col_idx or start_row >= end_row:
+        return
+
+    current_merge_start_row = start_row
+    value_to_match = worksheet.cell(row=start_row, column=col_idx).value
+
+    for row_idx in range(start_row + 1, end_row + 2):
+        cell_value = worksheet.cell(row=row_idx, column=col_idx).value if row_idx <= end_row else object()
+        if cell_value != value_to_match:
+            if row_idx - 1 > current_merge_start_row:
+                if value_to_match is not None and str(value_to_match).strip():
+                    try:
+                        worksheet.merge_cells(
+                            start_row=current_merge_start_row,
+                            start_column=col_idx,
+                            end_row=row_idx - 1,
+                            end_column=col_idx
+                        )
+                    except Exception as e:
+                        print(f"Could not merge cells for ID {col_id_to_merge} from row {current_merge_start_row} to {row_idx - 1}. Error: {e}")
+            
+            current_merge_start_row = row_idx
+            if row_idx <= end_row:
+                value_to_match = cell_value
 
 
 def find_footer(worksheet: Worksheet, footer_rules: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -807,40 +704,37 @@ def write_configured_rows(
 
     print(f"--- Finished writing configured rows ---")
 
-def apply_explicit_data_cell_merges(
+def apply_explicit_data_cell_merges_by_id(
     worksheet: Worksheet,
     row_num: int,
-    column_map: Dict[str, int],  # Maps header text to its 1-based column index
+    column_id_map: Dict[str, int],  # Maps column ID to its 1-based column index
     num_total_columns: int,
-    # merge_rules_data_cells: e.g., {'Header': {'rowspan': 3, ...}}
-    merge_rules_data_cells: Dict[str, Dict[str, Any]], 
-    sheet_styling_config: Optional[Dict[str, Any]] # e.g. {'Header': {'font': {'bold':True}}}
+    merge_rules_data_cells: Dict[str, Dict[str, Any]], # e.g., {'col_item': {'rowspan': 2}}
+    sheet_styling_config: Optional[Dict[str, Any]]
 ):
     """
-    Applies horizontal merges to data cells in a specific row
-    based on explicit rules. The merged cell will have a thin black border
-    around its entire perimeter and its content will be centered.
+    Applies horizontal merges to data cells in a specific row based on column IDs.
     """
     if not merge_rules_data_cells or row_num <= 0:
         return
 
     thin_side = Side(border_style="thin", color="000000")
-    full_thin_border = Border(
-        left=thin_side,
-        right=thin_side,
-        top=thin_side,
-        bottom=thin_side
-    )
+    full_thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    for header_text, rule_details in merge_rules_data_cells.items():
-        colspan_to_apply = rule_details.get("rowspan") 
+    # Loop through rules where the key is now the column ID
+    for col_id, rule_details in merge_rules_data_cells.items():
+        colspan_to_apply = rule_details.get("rowspan")
 
         if not isinstance(colspan_to_apply, int) or colspan_to_apply <= 1:
             continue
-        start_col_idx = column_map.get(header_text)
+        
+        # Get column index from the ID map
+        start_col_idx = column_id_map.get(col_id)
         if not start_col_idx:
+            print(f"Warning: Could not find column for merge rule with ID '{col_id}'.")
             continue
+            
         end_col_idx = start_col_idx + colspan_to_apply - 1
         end_col_idx = min(end_col_idx, num_total_columns)
 
@@ -848,173 +742,237 @@ def apply_explicit_data_cell_merges(
             continue
 
         try:
-            current_merged_cell_ranges = list(worksheet.merged_cells.ranges)
-            for mc_range in current_merged_cell_ranges:
+            # Unmerge any existing ranges in the target area
+            for mc_range in list(worksheet.merged_cells.ranges):
                 if mc_range.min_row == row_num and mc_range.max_row == row_num:
                     if mc_range.min_col <= end_col_idx and mc_range.max_col >= start_col_idx:
-                        try:
-                            worksheet.unmerge_cells(str(mc_range))
-                        except Exception:
-                            pass
+                        worksheet.unmerge_cells(str(mc_range))
             
+            # Apply the new merge
             worksheet.merge_cells(start_row=row_num, start_column=start_col_idx,
                                   end_row=row_num, end_column=end_col_idx)
             
-            anchor_cell: Cell = worksheet.cell(row=row_num, column=start_col_idx)
+            # Style the anchor cell of the new merged range
+            anchor_cell = worksheet.cell(row=row_num, column=start_col_idx)
             
-            # === DEBUGGING STEP FOR BORDERS ===
-            # If borders are not appearing AT ALL, try commenting out the following
-            # call to _apply_cell_style to isolate the issue. If borders appear
-            # when this is commented out, then _apply_cell_style is likely resetting
-            # or interfering with the border style.
-            if sheet_styling_config: 
-                 specific_rules_for_cell = sheet_styling_config.get(header_text)
-                 # _apply_cell_style(anchor_cell, header_text, specific_rules_for_cell) # <-- TRY COMMENTING THIS LINE
-            # === END DEBUGGING STEP ===
-
+            # Apply base styling for the column ID
+            _apply_cell_style(anchor_cell, col_id, sheet_styling_config)
+            
+            # Ensure the merged cell has the desired border and alignment
             anchor_cell.border = full_thin_border
             anchor_cell.alignment = center_alignment
 
         except Exception as e:
-            print(f"Error applying explicit data cell merge, border, or alignment for '{header_text}' on row {row_num} (col {start_col_idx}, span {colspan_to_apply}): {e}")
+            print(f"Error applying explicit data cell merge for ID '{col_id}' on row {row_num}: {e}")
+
+def _to_numeric(value: Any) -> Union[int, float, None, Any]:
+    """
+    Safely attempts to convert a value to a float or int.
+    Handles strings with commas and returns the original value on failure.
+    """
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        try:
+            cleaned_val = value.replace(',', '').strip()
+            if not cleaned_val:
+                return None
+            return float(cleaned_val) if '.' in cleaned_val else int(cleaned_val)
+        except (ValueError, TypeError):
+            return value # Return original string if conversion fails
+    if isinstance(value, Decimal):
+        return float(value)
+    return value # Return original value for other types
+
 
 def prepare_data_rows(
     data_source_type: str,
     data_source: Union[Dict, List],
     dynamic_mapping_rules: Dict[str, Any],
     column_id_map: Dict[str, int],
-    idx_to_header_map: Dict[int, str], # Needed for FOB fallback
+    idx_to_header_map: Dict[int, str],
     desc_col_idx: int,
     num_static_labels: int,
     static_value_map: Dict[int, Any]
 ) -> Tuple[List[Dict[int, Any]], List[int], bool, int]:
     """
-    Prepares the data rows for writing by transforming the source data based on mapping rules.
-    This version handles 'processed_tables_multi', 'aggregation', and 'fob_aggregation'.
+    Prepares data rows by mapping source data to columns based on their IDs.
+    This version standardizes the processing logic for different data source types.
     """
     data_rows_prepared = []
     pallet_counts_for_rows = []
     dynamic_desc_used = False
     num_data_rows_from_source = 0
+    
+    # These column IDs expect numeric data and will be converted automatically.
+    NUMERIC_IDS = {
+        "col_qty_pcs", "col_qty_sf", "col_unit_price", "col_amount",
+        "col_net", "col_gross", "col_cbm"
+    }
 
-    # --- Handler for 'processed_tables_multi' ---
-    if data_source_type == 'processed_tables_multi':
-        data_source = data_source or {}
-        max_len = 0
-        if isinstance(data_source, dict):
-            for value in data_source.values():
+    # --- Handler for 'processed_tables' ---
+    # This handles a single table's data, often used in a loop for multi-table sheets.
+    if data_source_type == 'processed_tables':
+        table_data = data_source or {}
+        if isinstance(table_data, dict):
+            # Determine the number of rows by the longest list in the data
+            max_len = 0
+            for value in table_data.values():
                 if isinstance(value, list):
                     max_len = max(max_len, len(value))
+            
             num_data_rows_from_source = max_len
             
-            raw_pallet_counts = data_source.get("pallet_count", [])
-            if isinstance(raw_pallet_counts, list):
-                pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts))
-            else:
-                pallet_counts_for_rows = [0] * max_len
+            # Prepare pallet counts for each row
+            raw_pallet_counts = table_data.get("pallet_count", [])
+            pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts)) if isinstance(raw_pallet_counts, list) else [0] * max_len
 
-        if num_data_rows_from_source > 0:
-            for i in range(num_data_rows_from_source):
+            # Iterate through each row index
+            for i in range(max_len):
                 row_dict = {}
+                # Iterate through the mapping rules to build the row
                 for data_key, mapping_rule in dynamic_mapping_rules.items():
                     target_id = mapping_rule.get("id")
                     target_col_idx = column_id_map.get(target_id)
+                    
                     if target_col_idx:
-                        source_list = data_source.get(data_key, [])
+                        source_list = table_data.get(data_key, [])
                         data_value = source_list[i] if i < len(source_list) else None
                         
+                        # Convert to number if the column ID is marked as numeric
+                        if target_id in NUMERIC_IDS:
+                            data_value = _to_numeric(data_value)
+                            
+                        # Add value to row if it's not empty, otherwise check for a fallback
                         is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
-                        
                         if not is_empty:
                             row_dict[target_col_idx] = data_value
-                            if target_col_idx == desc_col_idx:
+                            if target_col_idx == desc_col_idx: 
                                 dynamic_desc_used = True
                         elif "fallback_on_none" in mapping_rule:
                             row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
                 
                 data_rows_prepared.append(row_dict)
 
-    # --- Handler for 'aggregation' ---
+    # --- Handler for 'aggregation' (e.g., standard or custom invoice) ---
     elif data_source_type == 'aggregation':
-        num_data_rows_from_source = len(data_source) if isinstance(data_source, dict) else 0
-        pallet_counts_for_rows = [1] * num_data_rows_from_source
+        aggregation_data = data_source or {}
+        num_data_rows_from_source = len(aggregation_data) if isinstance(aggregation_data, dict) else 0
+        # Each aggregated row is treated as its own group/pallet conceptually
+        pallet_counts_for_rows = [1] * num_data_rows_from_source 
 
         if num_data_rows_from_source > 0:
-            for key_tuple, value_dict in data_source.items():
+            for key_tuple, value_dict in aggregation_data.items():
                 row_dict = {}
+                # Iterate through mapping rules to find where to place the data
                 for mapping_rule in dynamic_mapping_rules.values():
                     target_id = mapping_rule.get("id")
                     target_col_idx = column_id_map.get(target_id)
-                    if not target_col_idx: continue
-
+                    if not target_col_idx: 
+                        continue
+                    
                     data_value = None
+                    # Data can come from the aggregation key (e.g., PO number)
                     if 'key_index' in mapping_rule:
                         key_index = mapping_rule['key_index']
                         if isinstance(key_tuple, tuple) and 0 <= key_index < len(key_tuple):
-                            data_value = key_tuple[key_index]
+                             data_value = key_tuple[key_index]
+                    # Or from the aggregation values (e.g., sum of SQFT)
                     elif 'value_key' in mapping_rule:
                         value_key = mapping_rule['value_key']
-                        if isinstance(value_dict, dict):
+                        if isinstance(value_dict, dict): 
                             data_value = value_dict.get(value_key)
                     
-                    is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
+                    if target_id in NUMERIC_IDS:
+                        data_value = _to_numeric(data_value)
 
+                    is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
                     if not is_empty:
                         row_dict[target_col_idx] = data_value
-                        if target_col_idx == desc_col_idx:
+                        if target_col_idx == desc_col_idx: 
                             dynamic_desc_used = True
                     elif "fallback_on_none" in mapping_rule:
                         row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
+                
                 data_rows_prepared.append(row_dict)
 
-    # --- NEW: Handler for 'fob_aggregation' ---
+    # --- Handler for 'fob_aggregation' ---
     elif data_source_type == 'fob_aggregation':
-        num_data_rows_from_source = len(data_source) if isinstance(data_source, dict) else 0
-        pallet_counts_for_rows = [0] * num_data_rows_from_source # Pallets handled globally for FOB
-
+        fob_data = data_source or {}
+        num_data_rows_from_source = len(fob_data) if isinstance(fob_data, dict) else 0
+        pallet_counts_for_rows = [0] * num_data_rows_from_source # FOB sheets don't use pallet counts
+        
         if num_data_rows_from_source > 0:
-            sorted_keys = sorted(data_source.keys(), key=lambda k: int(k) if k.isdigit() else float('inf'))
+            # Sort keys to ensure consistent order
+            sorted_keys = sorted(fob_data.keys(), key=lambda k: int(k) if k.isdigit() else float('inf'))
+            
             for row_key in sorted_keys:
-                row_value_dict = data_source.get(row_key, {})
+                row_value_dict = fob_data.get(row_key, {})
                 row_dict = {}
-                
+                # Iterate through rules to map values like 'combined_po', 'total_sqft', etc.
                 for data_key, mapping_rule in dynamic_mapping_rules.items():
                     target_id = mapping_rule.get("id")
                     target_col_idx = column_id_map.get(target_id)
-                    if not target_col_idx: continue
-
-                    value = row_value_dict.get(data_key) # e.g., data_key is "combined_po"
+                    if not target_col_idx: 
+                        continue
                     
+                    value = row_value_dict.get(data_key)
+                    
+                    if target_id in NUMERIC_IDS:
+                        value = _to_numeric(value)
+                        
                     if value is not None:
-                        # Handle potential string-to-number conversion
-                        if isinstance(value, str):
-                            try:
-                                cleaned_val = value.replace(',', '').strip()
-                                if cleaned_val:
-                                    value = float(cleaned_val) if '.' in cleaned_val else int(cleaned_val)
-                                else:
-                                    value = None
-                            except (ValueError, TypeError):
-                                pass # Keep as string
-                        elif isinstance(value, Decimal):
-                             value = float(value)
-
                         row_dict[target_col_idx] = value
-
+                
                 data_rows_prepared.append(row_dict)
 
-    # --- Final Processing Steps for all types ---
+    # --- Final Processing Steps for all data types ---
+    # Apply any hardcoded static values to every row
     if static_value_map:
         for row_data in data_rows_prepared:
             for col_idx, static_val in static_value_map.items():
                 if col_idx not in row_data:
                     row_data[col_idx] = static_val
-
+                    
+    # Ensure there are enough rows to accommodate the static labels (e.g., for Packing List)
     if num_static_labels > len(data_rows_prepared):
-        for _ in range(num_static_labels - len(data_rows_prepared)):
-            data_rows_prepared.append({})
+        data_rows_prepared.extend([{}] * (num_static_labels - len(data_rows_prepared)))
 
     return data_rows_prepared, pallet_counts_for_rows, dynamic_desc_used, num_data_rows_from_source
+
+
+def _style_row_before_footer(
+    worksheet: Worksheet,
+    row_num: int,
+    num_columns: int,
+    sheet_styling_config: Optional[Dict[str, Any]],
+    idx_to_id_map: Dict[int, str],
+    col1_index: int
+):
+    """
+    Applies specific styling and borders to the static row before the main footer.
+    This is intended to be called AFTER fill_static_row.
+    """
+    if row_num <= 0:
+        return
+
+    thin_side = Side(border_style="thin", color="000000")
+    
+    for c_idx in range(1, num_columns + 1):
+        cell = worksheet.cell(row=row_num, column=c_idx)
+        current_id = idx_to_id_map.get(c_idx)
+
+        # Apply general cell styling (font, alignment, number format) first
+        _apply_cell_style(cell, current_id, sheet_styling_config)
+
+        # Now, apply the specific border logic for this row
+        if c_idx == col1_index:
+            # For col1_index (e.g., "Mark & Nº"), only left and right borders
+            cell.border = Border(left=thin_side, right=thin_side, top=None, bottom=None)
+        else:
+            # For all other columns in this row, apply a full thin border
+            cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
 
 
 def parse_mapping_rules(
@@ -1171,13 +1129,14 @@ def fill_invoice_data(
 
     try:
         data_cell_merging_rules = data_cell_merging_rules or {}
-        # --- Validate Header Info --- (Keep existing)
+        # --- Validate Header Info ---
         if not header_info or 'second_row_index' not in header_info or 'column_map' not in header_info or 'num_columns' not in header_info:
             print("Error: Invalid header_info provided.")
             return False, -1, -1, -1, 0
-        # V11: Determine start point based *directly* on passed header info
-        # initial_insert_point = header_info['second_row_index'] + 1 # OLD LOGIC
-        data_writing_start_row = header_info['second_row_index'] + 1 # Where data *content* begins
+
+        # --- FIX: Extract num_columns and other values from header_info ---
+        num_columns = header_info['num_columns']
+        data_writing_start_row = header_info['second_row_index'] + 1
  
         # --- Find Description & Pallet Info Column Indices --- (Keep existing)
         desc_col_idx = col_id_map.get("col_desc")
@@ -1332,500 +1291,155 @@ def fill_invoice_data(
             print(f"  initial_static_col1_values: {initial_static_col1_values}")
             print(f"  data_source_type: {data_source_type}")
             # --- END DEBUG START LOOP ---
-            try:
-                headers_to_sum = ["Amount(USD)", "PCS", "SF", "N.W (kgs)", "G.W (kgs)", "CBM","Quantity(SF)", "Quantity\n(SF)", "Amount(USD)", "Quantity ( SF )", "Amount ( USD )", "Quantity(SF)", "Total value(USD)", "Quantity"]
-                # Define general NO. column index needed for standard modes
-                no_col_idx = column_map.get("NO") or column_map.get("NO.") # Moved definition here
-                # Pre-find column indices needed for FOB mode
-                fob_unit_price_col_idx = None
-                fob_amount_col_idx = None
-                fob_quantity_col_idx = None
-                fob_no_col_idx = None
-                fob_pallet_info_col_idx = pallet_info_col_idx # Reuse general pallet info index if found
+        try:
+            # --- Create a reverse map from index to ID for easy lookups inside the loop ---
+            idx_to_id_map = {v: k for k, v in col_id_map.items()}
 
-                unit_price_headers = ["Unit price ( USD )", "Unit Price(USD)", "Unit Price\n(USD)", "Unit Price"]
-                amount_headers = ["Amount ( USD )", "Total value(USD)", "Amount(USD)"]
-                quantity_headers = ["Quantity ( SF )", "Quantity(SF)", "Quantity\n(SF)"]
-                no_headers = ["NO", "NO."]
+            # --- Get column indices directly using their stable IDs ---
+            no_col_idx = col_id_map.get("col_no")
+            pallet_info_col_idx = col_id_map.get("col_pallet")
+            
+            # Get the list of column IDs that need to be formatted as text
+            force_text_format_ids = sheet_styling_config.get("force_text_format_ids", []) if sheet_styling_config else []
+            
+            # Get the list of column IDs that should have a full grid border
+            grid_column_ids = sheet_styling_config.get("column_ids_with_full_grid", []) if sheet_styling_config else []
 
-                for header, col_idx in column_map.items():
-                    if header in unit_price_headers: fob_unit_price_col_idx = col_idx
-                    if header in amount_headers: fob_amount_col_idx = col_idx
-                    if header in quantity_headers: fob_quantity_col_idx = col_idx
-                    if header in no_headers: fob_no_col_idx = col_idx
-                    # fob_pallet_info_col_idx is already set from pallet_info_col_idx
+            row_pallet_index = 0
+            
+            # --- Main Data-Writing Loop ---
+            for i in range(actual_rows_to_process):
+                target_row = data_start_row + i
+                data_row_indices_written.append(target_row)
+                row_data_dict = data_rows_prepared[i] if i < len(data_rows_prepared) else {}
+                is_last_data_row = (i == actual_rows_to_process - 1)
 
-                row_pallet_index = 0 # Counter for rows consuming pallets within this chunk
-
-                for i in range(actual_rows_to_process):
-                    target_row = data_start_row + i
-                    data_row_indices_written.append(target_row)
-                    # row_data_dict = data_rows_prepared[i] if i < len(data_rows_prepared) else {} # Old, not needed for FOB this way
-                    is_last_data_row = (i == actual_rows_to_process - 1)
-
-                    # --- Modified Pallet Count Logic ---
-                    current_row_pallet_count = 0
-                    try:
-                        # Get the pallet count for the current row (only relevant for non-FOB modes currently)
-                        if data_source_type != 'fob_aggregation':
-                            raw_count = pallet_counts_for_rows[i] # Use index 'i' here
-                            current_row_pallet_count = int(raw_count) if isinstance(raw_count, (int, float)) or (isinstance(raw_count, str) and raw_count.isdigit()) else 0
-                            current_row_pallet_count = max(0, current_row_pallet_count)
-                    except (IndexError, ValueError, TypeError):
-                        pass # Keep current_row_pallet_count as 0 on error
-
-                    # Increment index *if* this row consumes pallets
-                    if current_row_pallet_count > 0:
-                         row_pallet_index += 1
-
-                    # Set the display value for the 'X' part using the row's pallet index within this chunk
-                    display_pallet_order = row_pallet_index
-
-
-
-                    # --- Cell Filling Logic --- #
-                    if data_source_type == 'fob_aggregation':
-                        # --- FOB Mode Filling (Revised - Process Row by Row) --- #
-                        # print(f"DEBUG: FOB Mode - Processing row {target_row} (i={i})")
-
-                        # 1. Write Static Label (if applicable for this row index)
-                        if i < num_static_labels:
-                            # print(f"DEBUG: FOB - Writing static label for i={i}")
-                            if col1_index and i < len(initial_static_col1_values):
-                                static_val_to_write = initial_static_col1_values[i]
-                                if static_val_to_write is not None:
-                                    try:
-                                        cell_static = worksheet.cell(row=target_row, column=col1_index, value=static_val_to_write)
-                                        _apply_cell_style(cell_static, static_column_header_name, sheet_styling_config)
-                                        # Ensure static label col is text if needed (less common, but safety)
-                                        if static_column_header_name in force_text_headers and cell_static.number_format != FORMAT_TEXT:
-                                            cell_static.number_format = FORMAT_TEXT
-                                    except Exception as static_write_err:
-                                        print(f"Warning: FOB Error writing static value '{static_val_to_write}' to {target_row},{col1_index}: {static_write_err}")
-                            else:
-                                # This case means static label config exists but no col1_index found, or index out of bounds
-                                pass
-                                # print(f"DEBUG: FOB - Skipping static label for i={i} (col1_index: {col1_index}, len: {len(initial_static_col1_values)})")
-
-                        # 2. Write Data (if applicable for this row index)
-                        if i < len(data_rows_prepared):
-                            current_fob_row_data = data_rows_prepared[i]
-                            # print(f"DEBUG: FOB - Writing data for i={i} from: {current_fob_row_data}")
-
-                            # Pre-calculate formula parts for this row
-                            amount_col_letter = get_column_letter(fob_amount_col_idx) if fob_amount_col_idx else None
-                            quantity_col_letter = get_column_letter(fob_quantity_col_idx) if fob_quantity_col_idx else None
-
-                            for c_idx in range(1, num_columns + 1):
-                                # --- Skip writing data to the static label column --- #
-                                if i < num_static_labels and c_idx == col1_index:
-                                    # print(f"DEBUG: FOB - Skipping data write to static col {c_idx} for i={i}")
-                                    continue # Don't overwrite static label with data
-
-                                cell = worksheet.cell(row=target_row, column=c_idx)
-                                current_header = idx_to_header_map.get(c_idx)
-                                value_to_write = None
-                                is_force_text_column = current_header in force_text_headers
-
-                                try:
-                                    # --- Determine Value --- #
-                                    if c_idx == fob_no_col_idx:
-                                        value_to_write = i + 1 # 1-based row number for data index i
-                                    elif c_idx == fob_unit_price_col_idx and amount_col_letter and quantity_col_letter:
-                                        qty_cell_ref = f"{quantity_col_letter}{target_row}"
-                                        amt_cell_ref = f"{amount_col_letter}{target_row}"
-                                        value_to_write = f"={amt_cell_ref}/{qty_cell_ref}"
-                                        # print(f"DEBUG: FOB - Set Unit Price formula {c_idx}: {value_to_write}")
-                                    elif c_idx == fob_pallet_info_col_idx:
-                                        # Use data row index i for pallet numbering within FOB group
-                                        pallet_order_fob = i + 1
-                                        value_to_write = f"{pallet_order_fob}-{local_chunk_pallets}"
-                                        # print(f"DEBUG: FOB - Set Pallet Info {c_idx}: {value_to_write}")
-                                    else:
-                                        # Get value from prepared data for this index i
-                                        value_to_write = current_fob_row_data.get(c_idx)
-                                        # Type conversion already handled during preparation
-
-                                    # --- Write Value --- #
-                                    cell.value = value_to_write
-
-                                    # --- Apply Formatting and Styles --- #
-                                    if is_force_text_column and cell.number_format != FORMAT_TEXT:
-                                        cell.number_format = FORMAT_TEXT
-                                    elif c_idx == fob_pallet_info_col_idx and cell.number_format != FORMAT_TEXT:
-                                         cell.number_format = FORMAT_TEXT
-
-                                    # Apply general cell style
-                                    _apply_cell_style(cell, current_header, sheet_styling_config)
-
-                                except Exception as write_err:
-                                    print(f"Warning: FOB - Error writing value '{value_to_write}' to {cell.coordinate}: {write_err}")
-                                    cell.value = "#WRITE_ERR!" # Indicate error in cell
-                        # else:
-                            # print(f"DEBUG: FOB - No data to write for i={i}")
-
-                        # 3. Ensure remaining columns are blank if only static label was written
-                        if i < num_static_labels and i >= len(data_rows_prepared):
-                            # print(f"DEBUG: FOB - Blanking remaining cells for static-only row i={i}")
-                            for c_idx in range(1, num_columns + 1):
-                                if c_idx != col1_index:
-                                    try: worksheet.cell(row=target_row, column=c_idx).value = None
-                                    except: pass # Ignore errors blanking cells
-
-                    else: # --- Standard Mode Filling (Remains unchanged) --- #
-                        # Determine row type flags ONCE per row
-                        row_data_dict = data_rows_prepared[i] if i < len(data_rows_prepared) else {}
-                        is_data_row = (i < len(data_rows_prepared))
-                        is_static_label_row = (i < num_static_labels)
-                    # merging rule for data cells
-
-                        for c_idx in range(1, num_columns + 1):
-                            cell = worksheet.cell(row=target_row, column=c_idx)
-                            current_header = idx_to_header_map.get(c_idx)
-                            value_to_write = None # Default value
-                            is_force_text_column = current_header in force_text_headers
-
-                            # --- Priority 1: Handle Static Label Column --- #
-                            if is_static_label_row and c_idx == col1_index:
-                                static_val_to_write = initial_static_col1_values[i] if i < len(initial_static_col1_values) else None
-                                value_to_write = static_val_to_write
-                                try:
-                                    cell.value = value_to_write
-                                    _apply_cell_style(cell, static_column_header_name, sheet_styling_config)
-                                except Exception as static_write_err:
-                                     print(f"Warning: Error writing static value '{static_val_to_write}' to {target_row},{col1_index}: {static_write_err}")
-                                continue # Static label takes precedence for this cell, move to next column
-
-                            # --- Priority 2: Handle Data Rows (for all columns other than the static label column handled above) --- #
-                            if is_data_row:
-                                # row_data_dict already fetched above
-
-                                # --- Determine if Custom Overrides apply to THIS cell (c_idx) --- #
-                                custom_unit_price_formula = None
-                                skip_amount_config_formula = False
-
-                                if custom_flag and data_source_type == 'aggregation':
-                                    # Check for Unit Price Column
-                                    unit_price_col_idx_formula = None
-                                    unit_price_headers_formula = ["Unit price ( USD )", "Unit Price(USD)", "unit price", "Unit Price\n(USD)"]
-                                    for header, col_idx in column_map.items():
-                                        if str(header).lower() in [h.lower() for h in unit_price_headers_formula]:
-                                            unit_price_col_idx_formula = col_idx
-                                            break
-                                    if c_idx == unit_price_col_idx_formula:
-                                        # Calculate custom formula for Unit Price
-                                        amount_col_idx_formula = None
-                                        quantity_col_idx_formula = None
-                                        amount_headers_formula = ["Amount ( USD )", "Total value(USD)", "amount", "amount_sum", "Amount(USD)"]
-                                        quantity_headers_formula = ["Quantity ( SF )", "Quantity(SF)", "Quantity", "sqft", "sqft_sum", "Quantity\n(SF)"]
-                                        for header, col_idx in column_map.items():
-                                            header_lower = str(header).lower()
-                                            if header_lower in [h.lower() for h in amount_headers_formula]: amount_col_idx_formula = col_idx
-                                            if header_lower in [h.lower() for h in quantity_headers_formula]: quantity_col_idx_formula = col_idx
-                                        if amount_col_idx_formula and quantity_col_idx_formula:
-                                            try:
-                                                amount_col_letter = get_column_letter(amount_col_idx_formula)
-                                                quantity_col_letter = get_column_letter(quantity_col_idx_formula)
-                                                custom_unit_price_formula = f"={amount_col_letter}{target_row}/{quantity_col_letter}{target_row}"
-                                            except Exception: custom_unit_price_formula = "#FORMULA_ERR!"
-                                        else: custom_unit_price_formula = "#REF!"
-                                        print(f"DEBUG: Custom Aggregation - Setting Unit Price Formula for {target_row},{c_idx}: {custom_unit_price_formula}")
-
-                                    # Check for Amount Column (to skip config formula later)
-                                    amount_col_idx_override_check = None
-                                    amount_headers_override_check = ["Amount ( USD )", "Total value(USD)", "amount", "amount_sum", "Amount(USD)"]
-                                    for header, col_idx in column_map.items():
-                                        if str(header).lower() in [h.lower() for h in amount_headers_override_check]:
-                                            amount_col_idx_override_check = col_idx
-                                            break
-                                    if c_idx == amount_col_idx_override_check:
-                                        skip_amount_config_formula = True
-                                        print(f"DEBUG: Custom Aggregation - Identified Amount column {c_idx}. Config formula will be skipped.")
-
-                                # --- Determine Value to Write for Data Cell --- #
-                                if custom_unit_price_formula is not None:
-                                    value_to_write = custom_unit_price_formula # Use the custom formula
-                                # --- Add Pallet Info Check Here --- #
-                                elif pallet_info_col_idx is not None and c_idx == pallet_info_col_idx:
-                                    # Use the locally calculated index for 'X'
-                                    value_to_write = f"{display_pallet_order}-{local_chunk_pallets}"
-                                # --- End Pallet Info Check --- #
-                                # --- Add NO. Column Check Here (Standard Mode) --- #
-                                elif no_col_idx is not None and c_idx == no_col_idx: # Use the general no_col_idx found earlier
-                                    value_to_write = i + 1 # Use loop index (0-based) + 1 for sequential numbering
-                                # --- End NO. Column Check --- #
-                                elif c_idx in formula_rules and not skip_amount_config_formula: # Apply config formula (if not skipped)
-                                    print(f"DEBUG: Applying config formula for column {c_idx}")
-                                    rule = formula_rules[c_idx]; formula_template = rule["template"]; input_headers = rule["input_headers"]
-                                    formula_params = {'row': target_row}; valid_inputs = True
-                                    for idx, input_header in enumerate(input_headers):
-                                        input_col_idx = column_map.get(input_header)
-                                        if input_col_idx: formula_params[f'col_ref_{idx}'] = get_column_letter(input_col_idx)
-                                        else: valid_inputs = False; break
-                                    if valid_inputs:
-                                        try: value_to_write = f"={formula_template.format(**formula_params)}"
-                                        except Exception: value_to_write = "#ERR!"
-                                    else: value_to_write = "#REF!"
-                                else: # Apply standard mapping (if no formula applied)
-                                    value_to_write = row_data_dict.get(c_idx)
-                                    # Handle type conversions for mapped values
-                                    if isinstance(value_to_write, str):
-                                        try:
-                                            cleaned_str = value_to_write.replace(',', '').strip()
-                                            if cleaned_str: value_to_write = float(cleaned_str) if '.' in cleaned_str or 'e' in cleaned_str.lower() else int(cleaned_str)
-                                            elif not (current_header in headers_to_sum): pass # Keep non-numeric strings if not a sum col
-                                            else: value_to_write = None # Blank out sum columns if empty string
-                                        except ValueError: pass # Keep as string if conversion fails
-                                    elif isinstance(value_to_write, Decimal): value_to_write = float(value_to_write)
-
-                                # --- Write Value and Apply Style for Data Cell --- #
-                                cell.value = value_to_write
-                                is_force_text_column = current_header in force_text_headers
-                                if is_force_text_column and cell.number_format != FORMAT_TEXT: cell.number_format = FORMAT_TEXT
-                                elif pallet_info_col_idx == c_idx and cell.number_format != FORMAT_TEXT: cell.number_format = FORMAT_TEXT
-                                _apply_cell_style(cell, current_header, sheet_styling_config)
-
-                            # --- Priority 3: Handle Purely Static Rows (non-data), Non-Label Columns --- #
-                            elif is_static_label_row: # Only executes if is_data_row was false AND is_static_label_row is true
-                                # We already handled c_idx == col1_index with 'continue'
-                                # So this handles other columns in rows that ONLY have a static label
-                                cell.value = None # Ensure blank
-                                # Apply minimal styling if needed (e.g., borders)
-                                # _apply_cell_style(cell, current_header, sheet_styling_config) # Optional styling for blank static cells
-                            # --- Else (row is neither data nor static label - should not happen if actual_rows_to_process is correct) --- #
-                            # Optionally handle this case if needed, but likely implies row count mismatch
-
-                    # --- Apply Border (Common to both modes, done once per row) ---
-                    for c_idx_border in range(1, num_columns + 1):
-                        try: 
-                            cell = worksheet.cell(row=target_row, column=c_idx_border)
-                            current_header = idx_to_header_map.get(c_idx_border)
-                            col_styles = sheet_styling_config.get("column_styles", {}) if sheet_styling_config else {}
-                            col_specific_style = col_styles.get(current_header, {}) if current_header else {}
-                            apply_grid_col = col_specific_style.get("border") == "full_grid"
-                            apply_grid_list = current_header and current_header in columns_to_grid
-                            apply_grid = apply_grid_col or apply_grid_list
-                            top_b = thin_side if i == 0 else (thin_side if apply_grid else None)
-                            bottom_b = thin_side if is_last_data_row else (thin_side if apply_grid else None)
-                            is_initial_static_col_border = (c_idx_border == col1_index)
-                            if apply_special_border_rule and is_initial_static_col_border: cell.border = Border(left=thin_side, right=thin_side, top=(thin_side if i==0 else None), bottom=None)
-                            elif apply_grid: cell.border = thin_border
-                            else: cell.border = Border(left=thin_side, right=thin_side, top=top_b, bottom=bottom_b)
-                        except IndexError: 
-                            continue # Skip if cell index is somehow out of bounds
-                        except Exception as border_err:
-                            # Add an except block to catch other potential border errors
-                            print(f"Warning: Error applying border to {target_row},{c_idx_border}: {border_err}")
-                            pass # Continue processing other cells/rows
-
-                    if data_cell_merging_rules: # Check if there are any rules for this sheet
-                        apply_explicit_data_cell_merges(
-                                worksheet=worksheet,
-                                row_num=target_row,
-                                column_map=column_map,
-                                num_total_columns=num_columns,
-                                merge_rules_data_cells=data_cell_merging_rules, # Your variable name
-                                sheet_styling_config=sheet_styling_config
-                            )
-            except Exception as fill_data_err:
-                print(f"Error during data filling loop: {fill_data_err}\n{traceback.format_exc()}")
-                return False, footer_row_final + 1, data_start_row, data_end_row, 0
-
-            # --- Merge Description Column ---
-            # Revised logic (v6): Merge contiguous cells containing actual fallback text in the description column
-            # ONLY IF the description column was populated primarily by fallbacks/static values (i.e., dynamic_desc_used is False).
-            # If descriptions came from at least some dynamic source data (dynamic_desc_used is True), skip this merge.
-            # Also, if dynamic_desc_used is False but the cells are genuinely empty (None/whitespace), do not merge them.
-
-            # The dynamic_desc_used flag is set earlier in the fill_invoice_data function.
-            # It's True if any row's description came from direct, non-empty source data.
-            # It's False if all row descriptions are from fallbacks, static values, or remained empty.
-
-            if desc_col_idx is not None and actual_rows_to_process > 1 and not dynamic_desc_used: # Fallback scenario
+                # --- Pallet Count Logic (remains the same) ---
+                current_row_pallet_count = pallet_counts_for_rows[i] if i < len(pallet_counts_for_rows) else 0
+                if current_row_pallet_count is not None and current_row_pallet_count > 0:
+                    row_pallet_index += 1
+                display_pallet_order = row_pallet_index
                 
-                # --- Actual Description Merge Logic Starts Here (v6 - Merge non-empty fallback text ONLY IF dynamic_desc_used is False) ---
-                # This code runs if desc_col_idx is not None, actual_rows_to_process > 1, AND dynamic_desc_used is False.
+                # --- Cell Filling and Styling Loop ---
+                for c_idx in range(1, num_columns + 1):
+                    cell = worksheet.cell(row=target_row, column=c_idx)
+                    current_id = idx_to_id_map.get(c_idx)
+                    value_to_write = None
 
-                # Use the globally defined center_alignment for merged description cells.
-                merged_desc_alignment = center_alignment # Alignment(horizontal='center', vertical='center', wrap_text=True)
+                    # --- Priority 1: Handle Initial Static Label Column ---
+                    if i < num_static_labels and c_idx == col1_index:
+                        cell.value = initial_static_col1_values[i]
+                    
+                    # --- Priority 2: Handle Regular Data Rows ---
+                    else:
+                        # Check for a formula rule first
+                        if c_idx in formula_rules:
+                            rule = formula_rules[c_idx]
+                            formula_template = rule["template"]
+                            input_ids = rule["input_ids"]
+                            
+                            formula_params = {'row': target_row}
+                            valid_inputs = True
+                            for idx, input_id in enumerate(input_ids):
+                                input_col_idx = col_id_map.get(input_id)
+                                if input_col_idx:
+                                    formula_params[f'col_ref_{idx}'] = get_column_letter(input_col_idx)
+                                else:
+                                    valid_inputs = False; break
+                            
+                            value_to_write = f"={formula_template.format(**formula_params)}" if valid_inputs else "#REF!"
 
-                current_merge_block_start_idx = data_start_row
-                value_to_match_in_block = None
-                try:
-                    value_to_match_in_block = worksheet.cell(row=current_merge_block_start_idx, column=desc_col_idx).value
-                except Exception as e_cell_access:
-                    print(f"ERROR: Could not access initial cell for description merge at row {current_merge_block_start_idx}, col {desc_col_idx}. Error: {e_cell_access}")
-                    value_to_match_in_block = object() # Unique object to prevent matching
-
-                # Determine if the value of the current block being tracked is considered "empty"
-                is_current_block_value_empty = False
-                if value_to_match_in_block is None:
-                    is_current_block_value_empty = True
-                elif isinstance(value_to_match_in_block, str) and not value_to_match_in_block.strip():
-                    is_current_block_value_empty = True
-                
-                for row_idx_for_comparison in range(data_start_row + 1, data_end_row + 2):
-                    current_cell_value_for_comparison = None 
-                    is_iteration_past_data_end = (row_idx_for_comparison > data_end_row)
-
-                    if not is_iteration_past_data_end:
-                        try:
-                            current_cell_value_for_comparison = worksheet.cell(row=row_idx_for_comparison, column=desc_col_idx).value
-                        except Exception as e_cell_access_loop:
-                            print(f"ERROR: Could not access cell for description merge at row {row_idx_for_comparison}, col {desc_col_idx}. Error: {e_cell_access_loop}")
-                            current_cell_value_for_comparison = object() # Unique object
-
-                    if current_cell_value_for_comparison != value_to_match_in_block or is_iteration_past_data_end:
-                        block_end_row_idx = row_idx_for_comparison - 1
+                        # Check for special, hardcoded column behaviors
+                        elif c_idx == no_col_idx:
+                            value_to_write = i + 1
+                        elif c_idx == pallet_info_col_idx:
+                            value_to_write = f"{display_pallet_order}-{local_chunk_pallets}"
                         
-                        # Only perform the merge if:
-                        # 1. The block spans more than one row.
-                        # 2. The value of the block itself WAS NOT considered empty (i.e., it's actual fallback text).
-                        if block_end_row_idx > current_merge_block_start_idx and not is_current_block_value_empty: # <<<< MODIFIED CONDITION HERE
-                            try:
-                                worksheet.merge_cells(
-                                    start_row=current_merge_block_start_idx,
-                                    start_column=desc_col_idx,
-                                    end_row=block_end_row_idx,
-                                    end_column=desc_col_idx
-                                )
-                                top_cell_of_merged_block = worksheet.cell(row=current_merge_block_start_idx, column=desc_col_idx)
-                                top_cell_of_merged_block.alignment = merged_desc_alignment
-                                
-                            except Exception as e_merge:
-                                print(f"WARNING: Could not merge description cells from {current_merge_block_start_idx} to {block_end_row_idx}. Error: {e_merge}")
-                        elif block_end_row_idx > current_merge_block_start_idx and is_current_block_value_empty:
-                            # This case (empty block) is now skipped even if dynamic_desc_used is False.
-                            print(f"DEBUG: Skipped merging EMPTY description block in column {desc_col_idx} from row {current_merge_block_start_idx} to {block_end_row_idx} (value was None or whitespace).")
-                            pass 
+                        # Otherwise, get the value from the prepared data
+                        else:
+                            value_to_write = row_data_dict.get(c_idx)
+                        
+                        cell.value = value_to_write
 
-                        if not is_iteration_past_data_end:
-                            current_merge_block_start_idx = row_idx_for_comparison
-                            value_to_match_in_block = current_cell_value_for_comparison
-                            
-                            # Update emptiness check for the new block
-                            if value_to_match_in_block is None:
-                                is_current_block_value_empty = True
-                            elif isinstance(value_to_match_in_block, str) and not value_to_match_in_block.strip():
-                                is_current_block_value_empty = True
-                            else:
-                                is_current_block_value_empty = False
-                # --- Actual Description Merge Logic Ends Here (v6) ---
-                print(f":::::::::::::::::::: Finished Description cell merge attempt for sheet '{sheet_name}' (occurred because dynamic_desc_used was False)") # DEBUG
-            else:
-                # Print why merge is skipped
-                if desc_col_idx is None:
-                    print(f":::::::::::::::::::: Skipping Description merge for sheet '{sheet_name}' - Description column not found.")
-                elif actual_rows_to_process <= 1:
-                    print(f":::::::::::::::::::: Skipping Description merge for sheet '{sheet_name}' - Not enough rows ({actual_rows_to_process})")
-                elif dynamic_desc_used: # Check this condition (dynamic_desc_used is True)
-                    print(f":::::::::::::::::::: Skipping Description merge for sheet '{sheet_name}' - Descriptions used dynamic source data (dynamic_desc_used is True). Fallback merge logic is bypassed.")
+                    # --- Apply Cell Styling and Formatting ---
+                    if current_id in force_text_format_ids:
+                        cell.number_format = FORMAT_TEXT
+                    
+                    _apply_cell_style(cell, current_id, sheet_styling_config)
 
-# --- Merge Pallet Info Column (if applicable, similar to Description) ---
-            # This block should be placed AFTER the "Merge Description Column" block.
-            # It merges contiguous cells in the "Pallet\nNo" column if they have the same non-empty value,
-            # and if dynamic_desc_used is False (implying a more static/repetitive layout).
-            # get pallet_info_index
+                # --- Apply Border Rules for the entire row ---
+                for c_idx_border in range(1, num_columns + 1):
+                    cell_to_border = worksheet.cell(row=target_row, column=c_idx_border)
+                    border_id = idx_to_id_map.get(c_idx_border)
+                    
+                    apply_grid = border_id and border_id in grid_column_ids
+                    
+                    top_b = thin_side if i == 0 else (thin_side if apply_grid else None)
+                    bottom_b = thin_side if is_last_data_row else (thin_side if apply_grid else None)
+                    
+                    if apply_special_border_rule and c_idx_border == col1_index:
+                        cell_to_border.border = Border(left=thin_side, right=thin_side, top=(thin_side if i == 0 else None), bottom=None)
+                    elif apply_grid:
+                        cell_to_border.border = thin_border
+                    else:
+                        cell_to_border.border = Border(left=thin_side, right=thin_side, top=top_b, bottom=bottom_b)
 
-            if pallet_info_col_idx is not None and actual_rows_to_process > 1:
-                print(f":::::::::::::::::::: Starting Pallet Info cell merge for sheet '{sheet_name}' (dynamic_desc_used is False).")
+                # --- Apply explicit cell merging for this row ---
+                if data_cell_merging_rules:
+                    apply_explicit_data_cell_merges_by_id(
+                        worksheet=worksheet,
+                        row_num=target_row,
+                        column_id_map=col_id_map,
+                        num_total_columns=num_columns,
+                        merge_rules_data_cells=data_cell_merging_rules,
+                        sheet_styling_config=sheet_styling_config
+                    )
 
-                # Use the same center_alignment as used for description or define one.
-                # merged_pallet_alignment = center_alignment
+        except Exception as fill_data_err:
+            print(f"Error during data filling loop: {fill_data_err}\n{traceback.format_exc()}")
+            return False, footer_row_final + 1, data_start_row, data_end_row, 0
 
-                current_merge_block_start_idx_pallet = data_start_row
-                value_to_match_in_block_pallet = None
-                try:
-                    value_to_match_in_block_pallet = worksheet.cell(row=current_merge_block_start_idx_pallet, column=pallet_info_col_idx).value
-                except Exception as e_cell_access_pallet:
-                    print(f"ERROR: Could not access initial cell for pallet info merge at row {current_merge_block_start_idx_pallet}, col {pallet_info_col_idx}. Error: {e_cell_access_pallet}")
-                    value_to_match_in_block_pallet = object() # Unique object to prevent matching
+    # Merge Description Column if the layout used fallback/static data
+        if not dynamic_desc_used and data_start_row > 0 and data_end_row > data_start_row:
+            desc_col_id = "col_desc" 
+            if col_id_map.get(desc_col_id):
+                merge_contiguous_cells_by_id(
+                    worksheet=worksheet,
+                    start_row=data_start_row,
+                    end_row=data_end_row,
+                    col_id_to_merge=desc_col_id,
+                    column_id_map=col_id_map
+                )
 
-                # Determine if the value of the current block being tracked is considered "empty"
-                is_current_block_value_empty_pallet = False
-                if value_to_match_in_block_pallet is None:
-                    is_current_block_value_empty_pallet = True
-                elif isinstance(value_to_match_in_block_pallet, str) and not str(value_to_match_in_block_pallet).strip():
-                    is_current_block_value_empty_pallet = True
-
-                for row_idx_for_comparison_pallet in range(data_start_row + 1, data_end_row + 2): # Iterate one past the end
-                    current_cell_value_for_comparison_pallet = None
-                    is_iteration_past_data_end_pallet = (row_idx_for_comparison_pallet > data_end_row)
-
-                    if not is_iteration_past_data_end_pallet:
-                        try:
-                            current_cell_value_for_comparison_pallet = worksheet.cell(row=row_idx_for_comparison_pallet, column=pallet_info_col_idx).value
-                        except Exception as e_cell_access_loop_pallet:
-                            print(f"ERROR: Could not access cell for pallet info merge at row {row_idx_for_comparison_pallet}, col {pallet_info_col_idx}. Error: {e_cell_access_loop_pallet}")
-                            current_cell_value_for_comparison_pallet = object() # Unique object
-
-                    # If value changes or we are past the last data row, finalize the previous block
-                    if current_cell_value_for_comparison_pallet != value_to_match_in_block_pallet or is_iteration_past_data_end_pallet:
-                        block_end_row_idx_pallet = row_idx_for_comparison_pallet - 1
-
-                        # Only perform the merge if:
-                        # 1. The block spans more than one row.
-                        # 2. The value of the block itself WAS NOT considered empty.
-                        if block_end_row_idx_pallet > current_merge_block_start_idx_pallet and not is_current_block_value_empty_pallet:
-                            try:
-                                worksheet.merge_cells(
-                                    start_row=current_merge_block_start_idx_pallet,
-                                    start_column=pallet_info_col_idx,
-                                    end_row=block_end_row_idx_pallet,
-                                    end_column=pallet_info_col_idx
-                                )
-                                top_cell_of_merged_block_pallet = worksheet.cell(row=current_merge_block_start_idx_pallet, column=pallet_info_col_idx)
-                                top_cell_of_merged_block_pallet.alignment = center_alignment # Or merged_pallet_alignment
-                                
-                            except Exception as e_merge_pallet:
-                                print(f"WARNING: Could not merge Pallet Info cells from {current_merge_block_start_idx_pallet} to {block_end_row_idx_pallet}. Error: {e_merge_pallet}")
-                        elif block_end_row_idx_pallet > current_merge_block_start_idx_pallet and is_current_block_value_empty_pallet:
-                            print(f"DEBUG: Skipped merging EMPTY Pallet Info block in column {pallet_info_col_idx} from row {current_merge_block_start_idx_pallet} to {block_end_row_idx_pallet} (value was None or whitespace).")
-                            pass
-
-                        # Start a new block
-                        if not is_iteration_past_data_end_pallet:
-                            current_merge_block_start_idx_pallet = row_idx_for_comparison_pallet
-                            value_to_match_in_block_pallet = current_cell_value_for_comparison_pallet
-                            
-                            # Update emptiness check for the new block
-                            if value_to_match_in_block_pallet is None:
-                                is_current_block_value_empty_pallet = True
-                            elif isinstance(value_to_match_in_block_pallet, str) and not str(value_to_match_in_block_pallet).strip():
-                                is_current_block_value_empty_pallet = True
-                            else:
-                                is_current_block_value_empty_pallet = False
-                print(f":::::::::::::::::::: Finished Pallet Info cell merge attempt for sheet '{sheet_name}'.")
-            else:
-                # Print why pallet merge is skipped
-                if pallet_info_col_idx is None:
-                    print(f":::::::::::::::::::: Skipping Pallet Info merge for sheet '{sheet_name}' - Pallet Info column not found.")
-                elif actual_rows_to_process <= 1:
-                    print(f":::::::::::::::::::: Skipping Pallet Info merge for sheet '{sheet_name}' - Not enough rows ({actual_rows_to_process}).")
-                elif dynamic_desc_used: # Check this condition
-                    print(f":::::::::::::::::::: Skipping Pallet Info merge for sheet '{sheet_name}' - Dynamic descriptions were used (dynamic_desc_used is True), so pallet merge is also skipped.")
-            # --- End Merge Pallet Info Column ---
-
-
+        # Always try to merge the Pallet Info Column if it exists
+        if data_start_row > 0 and data_end_row > data_start_row:
+            pallet_col_id = "col_pallet" 
+            if col_id_map.get(pallet_col_id):
+                merge_contiguous_cells_by_id(
+                    worksheet=worksheet,
+                    start_row=data_start_row,
+                    end_row=data_end_row,
+                    col_id_to_merge=pallet_col_id,
+                    column_id_map=col_id_map
+                )
 
 # --- Fill Row Before Footer ---
         if add_blank_before_footer and row_before_footer_idx > 0:
             try:
-                 fill_static_row(worksheet, row_before_footer_idx, num_columns, static_content_before_footer) # Applies no_border by default
-                 # Re-apply styles and specific borders for this row
-                 for c_idx in range(1, num_columns + 1):
-                     cell = worksheet.cell(row=row_before_footer_idx, column=c_idx)
-                     # Apply general cell styling (font, alignment, number format) first
-                     _apply_cell_style(cell, idx_to_header_map.get(c_idx), sheet_styling_config) 
-                     
-                     # Now, apply specific border logic for this row
-                     if c_idx == col1_index: 
-                        # For col1_index (e.g., "Mark & Nº"), only left and right borders, no top/bottom
-                        cell.border = Border(left=thin_side, right=thin_side, top=None, bottom=None)
-                     else: 
-                        # For all other columns in the "row before footer", apply full thin borders
-                        cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-            except Exception as fill_bf_err: print(f"Warning: Error filling/styling row before footer: {fill_bf_err}")
+                # Step 1: Fill the row with content (this applies default styles)
+                fill_static_row(worksheet, row_before_footer_idx, num_columns, static_content_before_footer)
+                
+                # Step 2: Apply the special styling and borders for this specific row
+                _style_row_before_footer(
+                    worksheet=worksheet,
+                    row_num=row_before_footer_idx,
+                    num_columns=num_columns,
+                    sheet_styling_config=sheet_styling_config,
+                    idx_to_id_map=idx_to_id_map, # Pass the ID map here
+                    col1_index=col1_index
+                )
+            except Exception as fill_bf_err:
+                print(f"Warning: Error filling/styling row before footer: {fill_bf_err}")
 
         # --- Fill Footer Row --- (Keep existing logic)
         # The SUM formulas here should correctly sum the results of the formulas

@@ -54,7 +54,9 @@
         "force_text_format_ids": ["col_po", "col_item"],
         "column_ids_with_full_grid": ["col_po", "col_desc"],
         "column_id_styles": {
+          "col_unit_price": { "number_format": "#,##0.00" },
           "col_amount": { "number_format": "#,##0.00" },
+          "col_qty_sf":     { "number_format": "#,##0.00" },
           "col_desc": { "alignment": {"horizontal": "center"} }
         },
         "column_id_widths": { "col_po": 28, "col_desc": 20 },
@@ -121,6 +123,9 @@
       "add_blank_before_footer": true,
       "static_content_before_footer": {
         "2": "LEATHER (HS.CODE: 4107.12.00)"
+      },
+      "merge_rules_before_footer": {
+        "2":2
       },
       "header_to_write": [
         { "row": 0, "col": 0, "text": "Mark & Nº",   "id": "col_static",    "rowspan": 2 },

@@ -8,8 +8,7 @@
         "fob_inter_separator": "\\n",
         "timestamp": "2025-06-07T13:00:44.471905"
     },
-    "processed_tables_data": {
-        "1": {
+    "processed_tables_data": { "1": {
             "po": [
                 "YNGY25022",
                 "YNGY25028",

@@ -507,7 +507,7 @@ def main():
  
                 # ***** REMOVED REDUNDANT PRE-CALCULATION LOOP - NOW DONE GLOBALLY *****
  
-                # --- V11: Main loop now only writes data, doesn't insert --- # TODO
+                # --- V11: Main loop now only writes data, doesn't insert --- # TODO urgent
                 for i, table_key in enumerate(table_keys):
                     print(f"\nProcessing table key: '{table_key}' ({i+1}/{num_tables})")
                     table_data_to_fill = all_tables_data.get(str(table_key))
