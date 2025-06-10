@@ -20,7 +20,7 @@ import openpyxl
 import traceback
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, List, Tuple
 import ast # <-- Add import for literal_eval
 from decimal import Decimal # <-- Add import for Decimal evaluation
 import re # <-- Add import for regular expressions
@@ -291,6 +291,28 @@ def load_data(data_path: Path) -> Optional[Dict[str, Any]]:
     except Exception as e: print(f"Error loading data file {data_path}: {e}"); traceback.print_exc(); return None
 # --- End Placeholder ---
 
+def calculate_header_dimensions(header_layout: List[Dict[str, Any]]) -> Tuple[int, int]:
+    """
+    Calculates the total number of rows and columns a header will occupy.
+
+    Args:
+        header_layout: The list of dictionaries defining the header.
+
+    Returns:
+        A tuple containing (num_header_rows, num_header_columns).
+        Returns (0, 0) if the layout is empty.
+    """
+    if not header_layout:
+        return (0, 0)
+
+    # Calculate the total number of rows the header occupies
+    num_rows = max(cell.get('row', 0) + cell.get('rowspan', 1) for cell in header_layout)
+
+    # Calculate the total number of columns the header occupies
+    num_cols = max(cell.get('col', 0) + cell.get('colspan', 1) for cell in header_layout)
+
+    return (num_rows, num_cols)
+
 
 # --- Main Orchestration Logic ---
 def main():
@@ -441,7 +463,7 @@ def main():
                     if not table_data_to_fill or not isinstance(table_data_to_fill, dict): continue # Skip if no data
 
                     # Rows for header
-                    num_header_rows = len(header_to_write) if isinstance(header_to_write, list) else 0
+                    num_header_rows, num_columns = calculate_header_dimensions(header_to_write)
                     total_rows_to_insert += num_header_rows
                     print(f"  Table {table_key}: +{num_header_rows} (header)")
 
