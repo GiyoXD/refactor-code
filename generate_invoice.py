@@ -313,6 +313,103 @@ def calculate_header_dimensions(header_layout: List[Dict[str, Any]]) -> Tuple[in
 
     return (num_rows, num_cols)
 
+# Add these to your imports at the top of the file
+from openpyxl.worksheet.worksheet import Worksheet 
+# You already have List, Dict, Any, Tuple from typing
+
+def pre_calculate_and_insert_rows(
+    worksheet: Worksheet,
+    sheet_name: str,
+    start_row: int,
+    table_keys: List[str],
+    all_tables_data: Dict[str, Any],
+    sheet_mapping_section: Dict[str, Any],
+    header_to_write: List[Dict[str, Any]]
+) -> Tuple[bool, int]:
+    """
+    Pre-calculates the total number of rows required for a multi-table layout and inserts them.
+
+    Args:
+        worksheet: The openpyxl worksheet object to modify.
+        sheet_name: The name of the sheet (for logging).
+        start_row: The starting row index for insertion.
+        table_keys: The sorted list of keys for the tables to be processed.
+        all_tables_data: The dictionary containing all table data.
+        sheet_mapping_section: The configuration section for the current sheet.
+        header_to_write: The header layout definition.
+
+    Returns:
+        A tuple containing:
+        - bool: True if the rows were inserted successfully, False otherwise.
+        - int: The total number of rows that were calculated and inserted.
+    """
+    # --- Pre-calculation ---
+    total_rows_to_insert = 0
+    num_tables = len(table_keys)
+    add_blank_after_hdr_flag = sheet_mapping_section.get("add_blank_after_header", False)
+    add_blank_before_ftr_flag = sheet_mapping_section.get("add_blank_before_footer", False)
+    final_row_spacing = sheet_mapping_section.get('row_spacing', 0)
+    summary_flag = sheet_mapping_section.get("summary", False)
+
+    print("--- Pre-calculating total rows for multi-table section ---")
+    for i, table_key in enumerate(table_keys):
+        table_data_to_fill = all_tables_data.get(str(table_key))
+        if not table_data_to_fill or not isinstance(table_data_to_fill, dict):
+            continue
+
+        num_header_rows, _ = calculate_header_dimensions(header_to_write)
+        total_rows_to_insert += num_header_rows
+        print(f"  Table {table_key}: +{num_header_rows} (header)")
+
+        if add_blank_after_hdr_flag:
+            total_rows_to_insert += 1
+            print(f"  Table {table_key}: +1 (blank after header)")
+
+        max_len = max((len(v) for v in table_data_to_fill.values() if isinstance(v, list)), default=0)
+        num_data_rows = max_len
+        total_rows_to_insert += num_data_rows
+        print(f"  Table {table_key}: +{num_data_rows} (data rows)")
+
+        if add_blank_before_ftr_flag:
+            total_rows_to_insert += 1
+            print(f"  Table {table_key}: +1 (blank before footer)")
+
+        total_rows_to_insert += 1
+        print(f"  Table {table_key}: +1 (footer)")
+
+        if i < num_tables - 1:
+            total_rows_to_insert += 1
+            print(f"  Table {table_key}: +1 (spacer)")
+
+    if num_tables > 1:
+        total_rows_to_insert += 1
+        print("  Overall: +1 (Grand Total Row)")
+
+    if summary_flag and num_tables > 0:
+        total_rows_to_insert += 2
+        print("  Overall: +2 (Summary Flag Rows)")
+
+    if final_row_spacing > 0:
+        total_rows_to_insert += final_row_spacing
+        print(f"  Overall: +{final_row_spacing} (Final Spacing)")
+
+    print(f"--- Total rows to insert for multi-table section: {total_rows_to_insert} ---")
+
+    # --- Bulk Insert ---
+    if total_rows_to_insert > 0:
+        try:
+            print(f"Inserting {total_rows_to_insert} rows at index {start_row} for sheet '{sheet_name}'...")
+            worksheet.insert_rows(start_row, amount=total_rows_to_insert)
+            invoice_utils.safe_unmerge_block(worksheet, start_row, start_row + total_rows_to_insert - 1, worksheet.max_column)
+            print("Bulk rows inserted and unmerged successfully.")
+            return True, total_rows_to_insert
+        except Exception as bulk_insert_err:
+            print(f"ERROR: Failed bulk row insert for multi-table: {bulk_insert_err}")
+            return False, 0
+    
+    return True, 0 # Succeeded, but inserted 0 rows
+
+
 
 # --- Main Orchestration Logic ---
 def main():
@@ -455,69 +552,22 @@ def main():
                 table_keys = sorted(all_tables_data.keys(), key=lambda x: int(x) if str(x).isdigit() else float('inf'))
                 print(f"Found table keys in data: {table_keys}"); num_tables = len(table_keys); last_table_header_info = None
 
-                # --- V11: Pre-calculate total rows needed for bulk insert --- 
-                total_rows_to_insert = 0
-                print("--- Pre-calculating total rows for multi-table section ---")
-                for i, table_key in enumerate(table_keys):
-                    table_data_to_fill = all_tables_data.get(str(table_key))
-                    if not table_data_to_fill or not isinstance(table_data_to_fill, dict): continue # Skip if no data
+                # --- Call the new refactored function ---
+                success, _ = pre_calculate_and_insert_rows(
+                    worksheet=worksheet,
+                    sheet_name=sheet_name,
+                    start_row=start_row,
+                    table_keys=table_keys,
+                    all_tables_data=all_tables_data,
+                    sheet_mapping_section=sheet_mapping_section,
+                    header_to_write=header_to_write
+                )
+                spacer_row = 1
 
-                    # Rows for header
-                    num_header_rows, num_columns = calculate_header_dimensions(header_to_write)
-                    total_rows_to_insert += num_header_rows
-                    print(f"  Table {table_key}: +{num_header_rows} (header)")
-
-                    # Rows for blank after header (if applicable)
-                    if add_blank_after_hdr_flag: total_rows_to_insert += 1; print(f"  Table {table_key}: +1 (blank after header)")
-
-                    # Rows for data
-                    num_data_rows = 0
-                    if isinstance(table_data_to_fill, dict):
-                        max_len = 0
-                        for value in table_data_to_fill.values():
-                            if isinstance(value, list): max_len = max(max_len, len(value))
-                        num_data_rows = max_len
-                    total_rows_to_insert += num_data_rows
-                    print(f"  Table {table_key}: +{num_data_rows} (data rows)")
-
-                    # Rows for blank before footer (if applicable)
-                    if add_blank_before_ftr_flag: total_rows_to_insert += 1; print(f"  Table {table_key}: +1 (blank before footer)")
-
-                    # Row for footer
-                    total_rows_to_insert += 1 # Always add 1 for the footer row itself
-                    print(f"  Table {table_key}: +1 (footer)")
-
-                    # Row for spacer (if not the last table)
-                    if i < num_tables - 1: total_rows_to_insert += 1; print(f"  Table {table_key}: +1 (spacer)")
-
-                # Rows for Grand Total (if more than one table)
-                if num_tables > 1: total_rows_to_insert += 1; print("  Overall: +1 (Grand Total Row)")
-
-                # Rows for Summary flag
-                summary_flag = sheet_mapping_section.get("summary", False)
-                if summary_flag and num_tables > 0: # Only add if GT row was added
-                    total_rows_to_insert += 2; print("  Overall: +2 (Summary Flag Rows)")
-
-                # Rows for Final Spacing
-                if final_row_spacing > 0: total_rows_to_insert += final_row_spacing; print(f"  Overall: +{final_row_spacing} (Final Spacing)")
-
-                print(f"--- Total rows to insert for multi-table section: {total_rows_to_insert} ---")
-                # --- End Pre-calculation ---
-
-                # --- V11: Perform Bulk Insert --- 
-                if total_rows_to_insert > 0:
-                    try:
-                        print(f"Inserting {total_rows_to_insert} rows at index {start_row} for sheet '{sheet_name}'...")
-                        worksheet.insert_rows(start_row, amount=total_rows_to_insert)
-                        # Unmerge the inserted block to prevent issues
-                        invoice_utils.safe_unmerge_block(worksheet, start_row, start_row + total_rows_to_insert - 1, worksheet.max_column)
-                        print("Bulk rows inserted and unmerged successfully.")
-                    except Exception as bulk_insert_err:
-                        print(f"ERROR: Failed bulk row insert for multi-table: {bulk_insert_err}")
-                        processing_successful = False
-                        # Decide how to handle this - skip sheet?
-                        continue # Skip processing this sheet if bulk insert fails
-                # --- End Bulk Insert ---
+                if not success:
+                    processing_successful = False
+                    continue # Skip to the next sheet if insertion failed
+                # --- End function call ---
 
                 # --- V11: Initialize write pointer --- 
                 write_pointer_row = start_row # Start writing at the beginning of the inserted block
@@ -543,7 +593,7 @@ def main():
                     last_table_header_info = written_header_info # Keep track for width setting later
  
                     # Update write pointer after header
-                    num_header_rows = len(header_to_write) if isinstance(header_to_write, list) else 0
+                    num_header_rows, num_columns = calculate_header_dimensions(sheet_header_to_write)
                     write_pointer_row += num_header_rows
  
                     print(f"Filling data and footer for table '{table_key}' starting near row {write_pointer_row}...")
@@ -583,6 +633,7 @@ def main():
                     # within the allocated space. next_row_after_chunk is the row AFTER its footer.
  
                     if fill_success:
+                        num_cols_spacer = 1
                         print(f"Finished table '{table_key}'. Next available write pointer is {next_row_after_chunk}")
                         grand_total_pallets_for_summary_row += table_pallets
                         if data_start > 0 and data_end >= data_start: all_data_ranges.append((data_start, data_end))
@@ -593,7 +644,6 @@ def main():
                         if not is_last_table: 
                             # Write the spacer row content (optional, could just be blank)
                             spacer_row = write_pointer_row
-                            num_cols_spacer = written_header_info.get('num_columns', worksheet.max_column)
                             if num_cols_spacer > 0:
                                 try:
                                     print(f"Writing merged spacer row at {spacer_row} across {num_cols_spacer} columns...")
@@ -615,318 +665,55 @@ def main():
                         processing_successful = False; break
                 # --- End Table Loop ---
  
-                # --- DEBUG: Check conditions before adding Grand Total Row --- 
-                print("\n--- Checking conditions for Grand Total Row ---")
-                print(f"  - processing_successful: {processing_successful}")
-                print(f"  - last_table_header_info is not None: {last_table_header_info is not None}")
-                if last_table_header_info:
-                     print(f"  - last_table_header_info content (keys): {list(last_table_header_info.keys())}")
-                print(f"  - num_tables > 1: {num_tables > 1} (num_tables={num_tables})") # Only add if more than 1 table
-                # --- END DEBUG ---
- 
                 # ***** ADD GRAND TOTAL ROW (for multi-table summary) *****
-                # V11: No insert needed, just write at the current pointer
-                if processing_successful and last_table_header_info and num_tables > 1:
-                    grand_total_row_num = write_pointer_row # Write at the current position
-                    print(f"\n--- Adding Grand Total Row at index {grand_total_row_num} ---")
-                    try:
-                        # worksheet.insert_rows(grand_total_row_num) # REMOVED INSERT
-                        invoice_utils.unmerge_row(worksheet, grand_total_row_num, last_table_header_info['num_columns'])
-                         
-                        # --- Define Grand Total Styling (using header config) ---
-                        grand_total_font = invoice_utils.bold_font # Default fallback
-                        grand_total_row_height = None # Default fallback (no specific height)
-                        if sheet_styling_config:
-                            header_font_config = sheet_styling_config.get("header_font")
-                            if header_font_config and isinstance(header_font_config, dict):
-                                try:
-                                    grand_total_font = openpyxl.styles.Font(
-                                        name=header_font_config.get("name", "Calibri"),
-                                        size=header_font_config.get("size", 11),
-                                        bold=header_font_config.get("bold", True),
-                                        italic=header_font_config.get("italic", False),
-                                    )
-                                except Exception as font_err:
-                                    print(f"Warning: Error creating font from header_font config: {font_err}. Using default bold font.")
-                            row_heights_config = sheet_styling_config.get("row_heights")
-                            if row_heights_config and isinstance(row_heights_config, dict):
-                                grand_total_row_height = row_heights_config.get("header")
+                    if processing_successful and num_tables > 1:
+                        grand_total_row_num = write_pointer_row
+                        print(f"\n--- Adding Grand Total Row at index {grand_total_row_num} using write_footer_row ---")
+                        try:
+                            # Get the footer configuration from the sheet's mapping section
+                            footer_config_for_gt = sheet_mapping_section.get("footer_configurations", {})
 
-                        if grand_total_row_height is not None:
-                            try: worksheet.row_dimensions[grand_total_row_num].height = float(grand_total_row_height)
-                            except (ValueError, TypeError): print(f"Warning: Invalid header row height value '{grand_total_row_height}' in config.")
+                            # Call the reusable write_footer_row function with the correct arguments
+                            footer_row_index = invoice_utils.write_footer_row(
+                                worksheet=worksheet,
+                                footer_row_num=grand_total_row_num,
+                                header_info=last_table_header_info,
+                                sum_ranges=all_data_ranges,
+                                footer_config=footer_config_for_gt,
+                                pallet_count=grand_total_pallets_for_summary_row,
+                                override_total_text="TOTAL OF:",
+                                grand_total_flag=True
+                            )
 
-                        # Get necessary info from last header/styling
-                        column_map = last_table_header_info['column_map']
-                        idx_to_header_map = {v: k for k, v in column_map.items()}
-                        num_cols = last_table_header_info['num_columns']
-
-                        # --- Write "TOTAL OF:" text --- (Changed from GRAND TOTAL)
-                        po_col_idx = column_map.get("P.O Nº") or column_map.get("P.O N°") or column_map.get("P.O N °") 
-                        total_text_col_idx = po_col_idx # Default to PO column
-                        # Fallback logic if PO not found (find first text-like column)
-                        if not total_text_col_idx:
-                            for c_idx in range(1, num_cols + 1):
-                                hdr = idx_to_header_map.get(c_idx, "").lower()
-                                if "pallet" in hdr or "po" in hdr or "item" in hdr: # Add more keywords if needed
-                                    total_text_col_idx = c_idx
-                                    break
-                            if not total_text_col_idx: total_text_col_idx = 2 # Absolute fallback
-
-                        if total_text_col_idx:
-                            gt_cell = worksheet.cell(row=grand_total_row_num, column=total_text_col_idx, value="TOTAL OF: ")
-                            gt_cell.font = grand_total_font
-                            invoice_utils._apply_cell_style(gt_cell, idx_to_header_map.get(total_text_col_idx), sheet_styling_config)
-                            print(f"DEBUG: Wrote 'TOTAL OF:' to column {total_text_col_idx}")
-                        else: print("Warning: Could not find suitable column for 'TOTAL OF:'.")
-
-
-                        # --- Write Grand Total Pallets (for summary row) ---
-# --- Write Grand Total Pallets (for summary row - Configurable Column) ---
-                        gt_pallet_header_config_name = sheet_mapping_section.get("footer_pallet_count_column_header")
-                        gt_pallet_col_idx = None
-
-                        # Attempt 1: Use configured header name
-                        if gt_pallet_header_config_name:
-                            gt_pallet_col_idx = column_map.get(gt_pallet_header_config_name)
-                            if gt_pallet_col_idx is None:
-                                print(f"Warning: Configured Grand Total Row pallet header '{gt_pallet_header_config_name}' not found in column_map. Falling back...")
-                        else:
-                            print("DEBUG: 'grand_total_row_pallet_column_header' not configured for this sheet. Falling back for pallet count column.")
-
-                        # Attempt 2: Fallback to "Description" header
-                        if gt_pallet_col_idx is None:
-                            gt_pallet_col_idx = column_map.get("Description")
-                            if gt_pallet_col_idx is None:
-                                print("Warning: 'Description' header not found for Grand Total Row pallet count. Trying further fallback...")                        
-                        desc_col_idx = gt_pallet_col_idx
-                        if desc_col_idx:
-                            pallet_cell = worksheet.cell(row=grand_total_row_num, column=desc_col_idx)
-                            # Use the locally accumulated grand_total_pallets_for_summary_row here
-                            pallet_cell.value = f"{grand_total_pallets_for_summary_row} PALLETS"
-                            pallet_cell.font = grand_total_font
-                            invoice_utils._apply_cell_style(pallet_cell, idx_to_header_map.get(desc_col_idx), sheet_styling_config)
-                        else: print("Warning: Could not find Description column for grand total pallets summary row.")
-
-                        # --- Write Grand Total SUM Formulas ---
-                        headers_to_sum = ["PCS", "SF", "N.W (kgs)", "G.W (kgs)", "CBM"] # Adjust as needed
-                        if all_data_ranges: # Only sum if there were valid data ranges
-                            print(f"DEBUG: Creating grand total SUM formulas using ranges: {all_data_ranges}")
-                            for header_name in headers_to_sum:
-                                col_idx = column_map.get(header_name)
-                                if col_idx:
-                                    col_letter = get_column_letter(col_idx)
-                                    sum_parts = [f"{col_letter}{start}:{col_letter}{end}" for start, end in all_data_ranges]
-                                    formula = f"=SUM({','.join(sum_parts)})"
-                                    try:
-                                        sum_cell = worksheet.cell(row=grand_total_row_num, column=col_idx, value=formula)
-                                        sum_cell.font = grand_total_font
-                                        invoice_utils._apply_cell_style(sum_cell, header_name, sheet_styling_config)
-                                        print(f"DEBUG: Wrote SUM formula '{formula}' for '{header_name}'")
-                                    except Exception as e: print(f"Error writing SUM formula for {header_name}: {e}")
-                                else: print(f"Warning: Header '{header_name}' not found for grand total SUM.")
-                        else: print("DEBUG: No valid data ranges found. Skipping grand total SUM formulas.")
-
-                        # --- Apply Styling/Borders to Grand Total Row ---
-                        print(f"DEBUG: Styling grand total row {grand_total_row_num}...")
-                        for c_idx in range(1, num_cols + 1):
-                            cell = worksheet.cell(row=grand_total_row_num, column=c_idx)
-                            # cell.border = invoice_utils.thin_border # Apply full border
-                            # REMEMBER to uncomment this line when you're ready to apply the full border
-                            invoice_utils._apply_cell_style(cell, idx_to_header_map.get(c_idx), sheet_styling_config)
-                            cell.font = grand_total_font # Ensure font override
- 
-                        write_pointer_row += 1 # Update write pointer position after GT row
-                        print(f"--- Finished Adding Grand Total Row. Next write pointer: {write_pointer_row} ---")
- 
-                    except Exception as gt_err:
-                        print(f"--- ERROR adding Grand Total row: {gt_err} ---")
-                        traceback.print_exc()
-                # ***** END ADD GRAND TOTAL ROW *****
- 
-                # --- V11: Logic for Summary Rows (BUFFALO summary + blank) ---
-                # MOVED: This block now executes *after* GT row logic, conditional only on summary_flag
-                summary_flag = sheet_mapping_section.get("summary", False)
-                # Only proceed if summary flag is true AND processing was generally successful AND we have header info
-                if summary_flag and processing_successful and last_table_header_info:
-                    buffalo_summary_row = write_pointer_row # Target the *first* available row
-                    blank_summary_row = write_pointer_row + 1 # The second row remains blank
-
-                    print(f"DEBUG: summary flag is True. Preparing BUFFALO summary for row {buffalo_summary_row}.")
-
-                    try:
-                        # --- Define summary_font_to_use first, based on styling config or a default ---
-                        # This logic mirrors how grand_total_font is defined elsewhere, ensuring consistency
-                        # and availability even if the grand_total_font variable was not set (e.g., if num_tables <= 1).
-                        summary_font_to_use = invoice_utils.bold_font # Default fallback
-
-                        if sheet_styling_config:
-                            # Prefer a specific "summary_font" config if available, otherwise fallback to "header_font"
-                            font_config_key = "summary_font"
-                            if font_config_key not in sheet_styling_config:
-                                font_config_key = "header_font" # Fallback to using header_font style for summaries
-
-                            actual_font_config = sheet_styling_config.get(font_config_key)
-                            if actual_font_config and isinstance(actual_font_config, dict):
-                                try:
-                                    summary_font_to_use = openpyxl.styles.Font(
-                                        name=actual_font_config.get("name", "Calibri"), # Default font name
-                                        size=actual_font_config.get("size", 11),       # Default font size
-                                        bold=actual_font_config.get("bold", True),     # Summaries are often bold
-                                        italic=actual_font_config.get("italic", False),
-                                        # color=actual_font_config.get("color", "000000") # Optional: Add color if in config
-                                    )
-                                    print(f"DEBUG: summary_font_to_use created from config key '{font_config_key}'.")
-                                except Exception as font_err:
-                                    print(f"Warning: Error creating summary_font_to_use from config '{font_config_key}': {font_err}. Using default bold font.")
+                            if footer_row_index != -1:
+                                write_pointer_row += 1 # Advance pointer after the new row
+                                print(f"--- Finished Adding Grand Total Row. Next write pointer: {write_pointer_row} ---")
                             else:
-                                # This message indicates that neither "summary_font" nor "header_font" (as a fallback) was found in styling.
-                                print(f"DEBUG: No specific font configuration found for '{font_config_key}' (or its fallback 'header_font') in sheet_styling_config for summary rows. Using default bold_font.")
-                        else:
-                            print("DEBUG: No sheet_styling_config provided for summary_font_to_use. Using default bold_font.")
-                        # --- End summary_font_to_use definition ---
+                                print("--- ERROR: write_footer_row failed to generate the Grand Total row. ---")
+                                processing_successful = False
 
-                        # --- Calculate BUFFALO and COW Totals (Including Pallets) ---
-                        buffalo_totals = {"PCS": 0, "SF": 0, "N.W (kgs)": 0, "G.W (kgs)": 0, "CBM": 0}
-                        cow_totals = {"PCS": 0, "SF": 0, "N.W (kgs)": 0, "G.W (kgs)": 0, "CBM": 0}
-                        buffalo_pallet_total = 0
-                        cow_pallet_total = 0
-                        headers_to_sum = list(buffalo_totals.keys())
-
-                        for table_key in table_keys:
-                            table_data = all_tables_data.get(str(table_key))
-                            if not table_data or not isinstance(table_data, dict): continue
-
-                            descriptions = table_data.get("description", [])
-                            pallet_counts = table_data.get("pallet_count", []) # Get pallet counts
-                            max_len = len(descriptions)
-
-                            pcs_list = table_data.get("pcs", [])
-                            sf_list = table_data.get("sqft", [])
-                            nw_list = table_data.get("net", [])
-                            gw_list = table_data.get("gross", [])
-                            cbm_list = table_data.get("cbm", [])
-
-                            for i in range(max_len):
-                                desc_val = descriptions[i] if i < len(descriptions) else None
-                                is_buffalo = desc_val and "BUFFALO" in str(desc_val).upper()
-
-                                target_dict = buffalo_totals if is_buffalo else cow_totals
-                                current_pallet_count = 0
-                                try: # Calculate current row pallet count safely
-                                     if i < len(pallet_counts):
-                                         raw_count = pallet_counts[i]
-                                         current_pallet_count = int(raw_count) if isinstance(raw_count, (int, float)) or (isinstance(raw_count, str) and raw_count.isdigit()) else 0
-                                         current_pallet_count = max(0, current_pallet_count)
-                                except (ValueError, TypeError, IndexError): pass
-
-                                # Add pallet count to respective total
-                                if is_buffalo: buffalo_pallet_total += current_pallet_count
-                                else: cow_pallet_total += current_pallet_count
-
-                                # Add values to the appropriate dictionary safely
-                                try: target_dict["PCS"] += int(pcs_list[i]) if i < len(pcs_list) and str(pcs_list[i]).isdigit() else 0
-                                except (ValueError, TypeError, IndexError): pass
-                                try: target_dict["SF"] += float(sf_list[i]) if i < len(sf_list) and isinstance(sf_list[i], (int, float, str)) else 0.0
-                                except (ValueError, TypeError, IndexError): pass
-                                try: target_dict["N.W (kgs)"] += float(nw_list[i]) if i < len(nw_list) and isinstance(nw_list[i], (int, float, str)) else 0.0
-                                except (ValueError, TypeError, IndexError): pass
-                                try: target_dict["G.W (kgs)"] += float(gw_list[i]) if i < len(gw_list) and isinstance(gw_list[i], (int, float, str)) else 0.0
-                                except (ValueError, TypeError, IndexError): pass
-                                try: target_dict["CBM"] += float(cbm_list[i]) if i < len(cbm_list) and isinstance(cbm_list[i], (int, float, str)) else 0.0
-                                except (ValueError, TypeError, IndexError): pass
-
-                        # --- Get Styling and Column Info ---
-                        print(f"DEBUG: Writing BUFFALO summary to row {buffalo_summary_row} with totals: {buffalo_totals}, Pallets: {buffalo_pallet_total}")
-                        print(f"DEBUG: Writing COW summary to row {blank_summary_row} with totals: {cow_totals}, Pallets: {cow_pallet_total}")
-                        invoice_utils.unmerge_row(worksheet, buffalo_summary_row, last_table_header_info['num_columns'])
-                        invoice_utils.unmerge_row(worksheet, blank_summary_row, last_table_header_info['num_columns'])
-                        # The problematic line 'summary_font = grand_total_font' is now replaced by using summary_font_to_use directly.
-                        column_map_gt = last_table_header_info['column_map']
-                        idx_to_header_map_gt = {v: k for k, v in column_map_gt.items()}
-                        # Find Description column index ONCE
-                        desc_col_idx = column_map_gt.get("Description")
-                        label_col_idx = column_map_gt.get("PALLET\nNO.") or column_map_gt.get("P.O Nº") or column_map_gt.get("P.O N°") or column_map_gt.get("CUT.P.O.")
-                        if not label_col_idx:
-                            for c_idx_fb in range(1, last_table_header_info['num_columns'] + 1):
-                                 hdr_fb = idx_to_header_map_gt.get(c_idx_fb, "").lower()
-                                 if "pallet" in hdr_fb or "po" in hdr_fb or "item" in hdr_fb: label_col_idx = c_idx_fb; break
-                            if not label_col_idx: label_col_idx = 2 # Absolute fallback if no suitable column found
-
-                        # --- Write BUFFALO Summary Row ---
-                        if label_col_idx:
-                            label_cell = worksheet.cell(row=buffalo_summary_row, column=label_col_idx, value="TOTAL OF:")
-                            label_cell.font = summary_font_to_use # Apply the defined summary font
-                            invoice_utils._apply_cell_style(label_cell, idx_to_header_map_gt.get(label_col_idx), sheet_styling_config)
-                            description_bufflalo = worksheet.cell(row=buffalo_summary_row, column=label_col_idx + 1)
-                            description_bufflalo.font = summary_font_to_use # Apply the defined summary font
-                            description_bufflalo.alignment = openpyxl.styles.Alignment(horizontal='left', vertical='center')
-                            description_bufflalo.value = "BUFFALO"
-
-                        for header_name, total_value in buffalo_totals.items():
-                             col_idx = column_map_gt.get(header_name)
-                             if col_idx:
-                                 sum_cell = worksheet.cell(row=buffalo_summary_row, column=col_idx, value=total_value)
-                                 sum_cell.font = summary_font_to_use # Apply the defined summary font
-                                 invoice_utils._apply_cell_style(sum_cell, header_name, sheet_styling_config)
-                                 if header_name == "PCS": sum_cell.number_format = invoice_utils.FORMAT_NUMBER_COMMA_SEPARATED1
-                                 elif header_name == "CBM": sum_cell.number_format = '0.00'
-                                 else: sum_cell.number_format = invoice_utils.FORMAT_NUMBER_COMMA_SEPARATED2
-                        # Write BUFFALO pallet total
-                        if desc_col_idx:
-                             pallet_cell_buffalo = worksheet.cell(row=buffalo_summary_row, column=desc_col_idx)
-                             pallet_cell_buffalo.value = f"{buffalo_pallet_total} PALLETS"
-                             pallet_cell_buffalo.font = summary_font_to_use # Apply the defined summary font
-                             invoice_utils._apply_cell_style(pallet_cell_buffalo, "Description", sheet_styling_config)
-                        # Apply borders and font to all cells in the BUFFALO summary row
-                        for c_idx_sum in range(1, last_table_header_info['num_columns'] + 1):
-                             cell = worksheet.cell(row=buffalo_summary_row, column=c_idx_sum)
-                            #  cell.border = invoice_utils.thin_border # Uncomment to apply border
-                             if cell.value is not None: cell.font = summary_font_to_use # Ensure font is applied
-
-                        # --- Write COW Summary Row ---
-                        if label_col_idx:
-                            label_cell_cow = worksheet.cell(row=blank_summary_row, column=label_col_idx, value="TOTAL OF:") # Use blank_summary_row
-                            label_cell_cow.font = summary_font_to_use # Apply the defined summary font
-                            invoice_utils._apply_cell_style(label_cell_cow, idx_to_header_map_gt.get(label_col_idx), sheet_styling_config)
-                            description_cow = worksheet.cell(row=blank_summary_row, column=label_col_idx + 1)
-                            description_cow.font = summary_font_to_use # Apply the defined summary font
-                            description_cow.alignment = openpyxl.styles.Alignment(horizontal='left', vertical='center')
-                            description_cow.value = "LEATHER" # Changed from "COW" to "LEATHER" as per original code
-
-                        for header_name, total_value in cow_totals.items(): # Use cow_totals
-                             col_idx = column_map_gt.get(header_name)
-                             if col_idx:
-                                 sum_cell_cow = worksheet.cell(row=blank_summary_row, column=col_idx, value=total_value)
-                                 sum_cell_cow.font = summary_font_to_use # Apply the defined summary font
-                                 invoice_utils._apply_cell_style(sum_cell_cow, header_name, sheet_styling_config)
-                                 if header_name == "PCS": sum_cell_cow.number_format = invoice_utils.FORMAT_NUMBER_COMMA_SEPARATED1
-                                 elif header_name == "CBM": sum_cell_cow.number_format = '0.00'
-                                 else: sum_cell_cow.number_format = invoice_utils.FORMAT_NUMBER_COMMA_SEPARATED2
-                        # Write COW pallet total
-                        if desc_col_idx:
-                            pallet_cell_cow = worksheet.cell(row=blank_summary_row, column=desc_col_idx)
-                            pallet_cell_cow.value = f"{cow_pallet_total} PALLETS"
-                            pallet_cell_cow.font = summary_font_to_use # Apply the defined summary font
-                            invoice_utils._apply_cell_style(pallet_cell_cow, "Description", sheet_styling_config)
-                        # Apply borders and font to all cells in the COW summary row
-                        for c_idx_sum in range(1, last_table_header_info['num_columns'] + 1):
-                             cell = worksheet.cell(row=blank_summary_row, column=c_idx_sum)
-                            #  cell.border = invoice_utils.thin_border # Uncomment to apply border
-                             if cell.value is not None: cell.font = summary_font_to_use # Ensure font is applied
-
-                        # Advance pointer past the two summary rows (one written, one blank)
-                        write_pointer_row += 2
-                        print(f"DEBUG: Finished BUFFALO & COW summaries. Next pointer is now {write_pointer_row}.")
-
-                    except Exception as summary_err:
-                        print(f"Warning: Failed processing BUFFALO summary rows: {summary_err}")
-                        traceback.print_exc()
-                        # Decide if pointer should still advance? Maybe not if error is severe.
-                        # For now, let's advance it to avoid potential overlaps later.
-                        write_pointer_row += 2 # Advance pointer even on error
+                        except Exception as gt_err:
+                            print(f"--- ERROR preparing for or calling write_footer_row for Grand Total: {gt_err} ---")
+                            traceback.print_exc()
+                    # ***** END REVISED GRAND TOTAL ROW *****
+                # --- V11: Logic for Summary Rows (BUFFALO summary + blank) ---
+                summary_flag = sheet_mapping_section.get("summary", False)
+                sheet_inner_mapping_rules_dict = sheet_mapping_section.get('mappings', {})
+                if summary_flag and processing_successful and last_table_header_info:
+                    # Get the footer config to pass its styles to the summary writer
+                    footer_config_for_summary = sheet_mapping_section.get("footer_configurations", {})
+                    
+                    write_pointer_row = invoice_utils.write_summary_rows(
+                        worksheet=worksheet,
+                        start_row=write_pointer_row,
+                        header_info=last_table_header_info,
+                        all_tables_data=all_tables_data,
+                        table_keys=table_keys,
+                        footer_config=footer_config_for_summary, # <-- Pass the config here
+                        mapping_rules=sheet_inner_mapping_rules_dict,
+                        styling_config=sheet_styling_config
+                    )
                 # --- End Summary Rows Logic ---
-
                 # --- START FOB-Specific Hardcoded Replacements (Multi-Table) ---
                 if args.fob:
                     # Apply to the current multi-table sheet if --fob is active

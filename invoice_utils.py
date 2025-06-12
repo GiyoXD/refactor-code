@@ -1064,6 +1064,255 @@ def parse_mapping_rules(
             
     return parsed_result
 
+
+def write_summary_rows(
+    worksheet: Worksheet,
+    start_row: int,
+    header_info: Dict[str, Any],
+    all_tables_data: Dict[str, Any],
+    table_keys: List[str],
+    footer_config: Dict[str, Any],
+    mapping_rules: Dict[str, Any],
+    styling_config: Optional[Dict[str, Any]] = None
+) -> int:
+    """
+    Calculates and writes ID-driven summary rows, ensuring text cells are
+    formatted as text and the final bold font style is applied correctly.
+    """
+    buffalo_summary_row = start_row
+    leather_summary_row = start_row + 1
+    next_available_row = start_row + 2
+
+    try:
+        # --- Get Styles from Footer Config ---
+        style_config = footer_config.get('style', {})
+        font_to_apply = Font(**style_config.get('font', {'bold': True}))
+        align_to_apply = Alignment(**style_config.get('alignment', {'horizontal': 'center', 'vertical': 'center'}))
+
+        # --- Calculation and Writing Logic (remains the same) ---
+        # ... (all the calculation and cell writing logic is unchanged) ...
+        column_id_map = header_info.get('column_id_map', {})
+        idx_to_id_map = {v: k for k, v in column_id_map.items()}
+        data_map = mapping_rules.get('data_map', {})
+        numeric_ids_to_sum = ["col_qty_pcs", "col_qty_sf", "col_net", "col_gross", "col_cbm"]
+        id_to_data_key_map = {v['id']: k for k, v in data_map.items() if v.get('id') in numeric_ids_to_sum}
+        ids_to_sum = list(id_to_data_key_map.keys())
+        buffalo_totals = {col_id: 0 for col_id in ids_to_sum}
+        cow_totals = {col_id: 0 for col_id in ids_to_sum}
+        buffalo_pallet_total = 0
+        cow_pallet_total = 0
+        for table_key in table_keys:
+            table_data = all_tables_data.get(str(table_key), {})
+            descriptions = table_data.get("description", [])
+            pallet_counts = table_data.get("pallet_count", [])
+            for i in range(len(descriptions)):
+                raw_val = descriptions[i]
+                desc_val = raw_val
+                if isinstance(raw_val, list) and raw_val:
+                    desc_val = raw_val[0]
+                is_buffalo = desc_val and "BUFFALO" in str(desc_val).upper()
+                target_dict = buffalo_totals if is_buffalo else cow_totals
+                try:
+                    pallet_val = int(pallet_counts[i]) if i < len(pallet_counts) else 0
+                    if is_buffalo:
+                        buffalo_pallet_total += pallet_val
+                    else:
+                        cow_pallet_total += pallet_val
+                except (ValueError, TypeError): pass
+                for col_id in ids_to_sum:
+                    data_key = id_to_data_key_map.get(col_id)
+                    if not data_key: continue
+                    data_list = table_data.get(data_key, [])
+                    if i < len(data_list):
+                        try:
+                            value_to_add = data_list[i]
+                            if isinstance(value_to_add, (int, float)):
+                                target_dict[col_id] += float(value_to_add)
+                            elif isinstance(value_to_add, str) and value_to_add.strip():
+                                target_dict[col_id] += float(value_to_add.replace(',', ''))
+                        except (ValueError, TypeError, IndexError): pass
+        num_columns = header_info['num_columns']
+        desc_col_idx = column_id_map.get("col_desc")
+        label_col_idx = column_id_map.get("col_po") or 2
+        unmerge_row(worksheet, buffalo_summary_row, num_columns)
+        worksheet.cell(row=buffalo_summary_row, column=label_col_idx, value="TOTAL OF:").number_format = FORMAT_TEXT
+        worksheet.cell(row=buffalo_summary_row, column=label_col_idx + 1, value="BUFFALO").number_format = FORMAT_TEXT
+        if desc_col_idx:
+            worksheet.cell(row=buffalo_summary_row, column=desc_col_idx, value=f"{buffalo_pallet_total} PALLETS").number_format = FORMAT_TEXT
+        for col_id, total_value in buffalo_totals.items():
+            col_idx = column_id_map.get(col_id)
+            if col_idx:
+                worksheet.cell(row=buffalo_summary_row, column=col_idx, value=total_value)
+        unmerge_row(worksheet, leather_summary_row, num_columns)
+        worksheet.cell(row=leather_summary_row, column=label_col_idx, value="TOTAL OF:").number_format = FORMAT_TEXT
+        worksheet.cell(row=leather_summary_row, column=label_col_idx + 1, value="LEATHER").number_format = FORMAT_TEXT
+        if desc_col_idx:
+            worksheet.cell(row=leather_summary_row, column=desc_col_idx, value=f"{cow_pallet_total} PALLETS").number_format = FORMAT_TEXT
+        for col_id, total_value in cow_totals.items():
+            col_idx = column_id_map.get(col_id)
+            if col_idx:
+                worksheet.cell(row=leather_summary_row, column=col_idx, value=total_value)
+
+
+        # --- Apply Styles to Both Rows with Correct Order ---
+        for row_num in [buffalo_summary_row, leather_summary_row]:
+            for c_idx in range(1, num_columns + 1):
+                cell = worksheet.cell(row=row_num, column=c_idx)
+                current_col_id = idx_to_id_map.get(c_idx)
+
+                # Step 1: Apply column-specific styles first (like number formats).
+                _apply_cell_style(cell, current_col_id, styling_config)
+
+                # Step 2: Enforce the general footer style as the final rule.
+                cell.font = font_to_apply
+                cell.alignment = align_to_apply
+                cell.border = no_border
+        
+        # --- Apply Row Height (remains the same) ---
+        footer_height = None
+        if styling_config:
+            row_heights_cfg = styling_config.get("row_heights", {})
+            footer_height = row_heights_cfg.get("footer", row_heights_cfg.get("header"))
+        if footer_height is not None:
+            try:
+                h_val = float(footer_height)
+                worksheet.row_dimensions[buffalo_summary_row].height = h_val
+                worksheet.row_dimensions[leather_summary_row].height = h_val
+            except (ValueError, TypeError): pass
+
+        return next_available_row
+
+    except Exception as summary_err:
+        print(f"Warning: Failed processing summary rows: {summary_err}")
+        traceback.print_exc()
+        return start_row + 2
+
+def write_footer_row(
+    worksheet: Worksheet,
+    footer_row_num: int,
+    header_info: Dict[str, Any],
+    sum_ranges: List[Tuple[int, int]],
+    footer_config: Dict[str, Any],
+    pallet_count: int,
+    override_total_text: Optional[str] = None,
+    fob_mode: bool = False,
+    grand_total_flag: bool = False
+) -> int:
+    """
+    Writes a fully configured footer row, including styling, borders, merges,
+    summed totals with number formatting, and a pallet count summary.
+
+    This function is driven entirely by a footer configuration object and can sum
+    over multiple, non-contiguous data ranges.
+
+    Args:
+        worksheet: The openpyxl worksheet to modify.
+        footer_row_num: The 1-based row index for the footer.
+        header_info: The header dictionary containing 'column_id_map' and 'num_columns'.
+        sum_ranges: A list of tuples, where each tuple is a (start_row, end_row) of data to sum.
+        footer_config: The footer configuration object from the JSON.
+        pallet_count: The total number of pallets to display in the footer.
+        override_total_text: Optional text to use instead of the one in the config.
+
+    Returns:
+        The row index (footer_row_num) on success, or -1 on failure.
+    """
+    if not footer_config or footer_row_num <= 0:
+        return -1
+
+    try:
+        # --- 1. Parse Configs and Prepare Style Objects ---
+        num_columns = header_info.get('num_columns', 1)
+        column_map_by_id = header_info.get('column_id_map', {})
+
+        # Get style configurations with sensible defaults
+        style_config = footer_config.get('style', {})
+        font_config = style_config.get('font', {'bold': True})
+        align_config = style_config.get('alignment', {'horizontal': 'center', 'vertical': 'center'})
+        border_config = style_config.get('border', {'apply': True})
+        
+        # Get number format configuration
+        number_format_config = footer_config.get("number_formats", {})
+
+        # Create openpyxl style objects
+        font_to_apply = Font(**font_config)
+        align_to_apply = Alignment(**align_config)
+        border_to_apply = None
+        if border_config.get('apply'):
+            side = Side(border_style=border_config.get('style', 'thin'), color=border_config.get('color', '000000'))
+            border_to_apply = Border(left=side, right=side, top=side, bottom=side)
+
+        unmerge_row(worksheet, footer_row_num, num_columns)
+
+        # --- 2. Write Content (Labels, Formulas, and Pallet Count) ---
+        total_text = override_total_text if override_total_text is not None else footer_config.get("total_text", "TOTAL:")
+        total_text_col_id = footer_config.get("total_text_column_id")
+        if total_text_col_id and column_map_by_id.get(total_text_col_id):
+            cell = worksheet.cell(row=footer_row_num, column=column_map_by_id[total_text_col_id], value=total_text)
+            cell.font = font_to_apply
+            cell.alignment = align_to_apply
+
+        # Write Pallet Count Text
+        pallet_col_id = footer_config.get("pallet_count_column_id")
+        if pallet_col_id and pallet_count > 0:
+            pallet_col_idx = column_map_by_id.get(pallet_col_id)
+            if pallet_col_idx:
+                pallet_text = f"{pallet_count} PALLET{'S' if pallet_count != 1 else ''}"
+                cell = worksheet.cell(row=footer_row_num, column=pallet_col_idx, value=pallet_text)
+                cell.font = font_to_apply
+                cell.alignment = align_to_apply
+
+        sum_column_ids = footer_config.get("sum_column_ids", [])
+        if sum_ranges:
+            for col_id in sum_column_ids:
+                col_idx = column_map_by_id.get(col_id)
+                if col_idx:
+                    col_letter = get_column_letter(col_idx)
+                    sum_parts = [f"{col_letter}{start}:{col_letter}{end}" for start, end in sum_ranges]
+                    formula = f"=SUM({','.join(sum_parts)})"
+                    cell = worksheet.cell(row=footer_row_num, column=col_idx, value=formula)
+                    cell.font = font_to_apply
+                    cell.alignment = align_to_apply
+                    
+                    # Apply Number Formatting from Config
+                    number_format_str = number_format_config.get(col_id)
+                    if number_format_str and fob_mode:
+                        cell.number_format = "##0.00"
+                    elif number_format_str:
+                        cell.number_format = number_format_str["number_format"]
+        # --- 3. Apply Border and Final Styling to the Whole Row ---
+        if grand_total_flag != True:
+            for c_idx in range(1, num_columns + 1):
+                cell = worksheet.cell(row=footer_row_num, column=c_idx)
+                if cell.font != font_to_apply: cell.font = font_to_apply
+                if cell.alignment != align_to_apply: cell.alignment = align_to_apply
+                if border_to_apply:
+                    cell.border = border_to_apply
+
+        # --- 4. Apply Merges ---
+        merge_rules = footer_config.get("merge_rules", [])
+        for rule in merge_rules:
+            start_col_id = rule.get("start_column_id")
+            colspan = rule.get("colspan")
+            start_col = column_map_by_id.get(start_col_id)
+            if start_col and colspan:
+                end_col = min(start_col + colspan - 1, num_columns)
+                worksheet.merge_cells(start_row=footer_row_num, start_column=start_col, end_row=footer_row_num, end_column=end_col)
+                worksheet.cell(row=footer_row_num, column=start_col).alignment = align_to_apply
+
+        return footer_row_num
+
+    except Exception as e:
+        print(f"ERROR: An error occurred during footer generation on row {footer_row_num}: {e}")
+        return -1
+
+    except Exception as e:
+        print(f"ERROR: An error occurred during footer generation on row {footer_row_num}: {e}")
+        # On failure, return -1
+        return -1
+
+
+
 def fill_invoice_data(
     worksheet: Worksheet,
     sheet_name: str,
@@ -1085,7 +1334,7 @@ def fill_invoice_data(
     max_rows_to_fill: Optional[int] = None,
     grand_total_pallets: int = 0, # RE-ADDED parameter
     custom_flag: bool = False, # Added custom flag parameter
-    data_cell_merging_rules: Optional[Dict[str, Any]] = None # Added data cell merging rules 29/05/2025
+    data_cell_merging_rules: Optional[Dict[str, Any]] = None, # Added data cell merging rules 29/05/2025
     ) -> Tuple[bool, int, int, int, int]: # Still 5 return values
     """
     REVISED LOGIC V13: Added merge_rules_footer parameter.
@@ -1440,113 +1689,33 @@ def fill_invoice_data(
                 )
             except Exception as fill_bf_err:
                 print(f"Warning: Error filling/styling row before footer: {fill_bf_err}")
+        
 
         # --- Fill Footer Row --- (Keep existing logic)
         # The SUM formulas here should correctly sum the results of the formulas
         # written in the data rows above.
-        total_value_config = sheet_config.get("total_footer_text")
         if footer_row_final > 0:
-             unmerge_row(worksheet, footer_row_final, num_columns) # Ensure footer row is clear before writing
-             try:
-                 palletNo_col_inx = None
-                 headers_to_sum = ["PCS", "SF", "N.W (kgs)", "G.W (kgs)", "CBM", "Quantity ( SF )", "Amount ( USD )", "Quantity\n(SF)", "Total value(USD)", "Quantity", "Quantity(SF)", "Amount(USD)"]
-                 total_text_col_idx = None; item_col_idx = column_map.get("NO") or column_map.get("NO."); total_text_col_idx = item_col_idx
-                 if not total_text_col_idx: palletNo_col_inx = column_map.get("PALLET\nNO.") or column_map.get("Pallet\nNo"); total_text_col_idx = palletNo_col_inx
-                 if not total_text_col_idx: po_col_idx = column_map.get("P.O Nº") or column_map.get("P.O N°") or column_map.get("CUT.P.O.") ; total_text_col_idx = po_col_idx
-                 if not total_text_col_idx: mark_col_idx = column_map.get("Mark & Nº") or column_map.get("Mark & N °"); total_text_col_idx = mark_col_idx
-                 if not total_text_col_idx: desc_col_idx = column_map.get("placeholder") or column_map.get("Description\nOf Goods") or column_map.get("Description of Goods"); total_text_col_idx = desc_col_idx
-                 if not total_text_col_idx: total_text_col_idx = desc_col_idx if desc_col_idx else 1
-                 if total_text_col_idx:
-                     try: total_cell = worksheet.cell(row=footer_row_final, column=total_text_col_idx, value= total_value_config or "TOTAL OF: "); total_cell.font = effective_header_font; total_cell.alignment = effective_header_align # Removed _apply_cell_style call
-                     except Exception as e: print(f"Warning: Error writing 'TOTAL OF:' text: {e}")
+            # Get the footer configuration object from the main sheet config
+            footer_config = sheet_config.get("footer_configurations", {})
+            data_range_to_sum = [(data_start_row, data_end_row)]
 
-                 sum_range_valid = actual_rows_to_process > 0 and data_start_row <= data_end_row
-                 sum_start_row_for_formula = data_start_row; sum_end_row_for_formula = data_end_row
-                 for header_name in headers_to_sum:
-                     col_idx = column_map.get(header_name)
-                     if col_idx:
-                         formula_or_value = 0
-                         if sum_range_valid: col_letter = get_column_letter(col_idx); formula_or_value = f"=SUM({col_letter}{sum_start_row_for_formula}:{col_letter}{sum_end_row_for_formula})"
-                         try: cell = worksheet.cell(row=footer_row_final, column=col_idx, value=formula_or_value); cell.font = effective_header_font; cell.alignment = effective_header_align # Removed _apply_cell_style
-                         except Exception as e: print(f"Warning: Error writing SUM formula for {header_name}: {e}")
+            pallet_count = 0
+            if data_source_type == "processed_tables":
+                pallet_count = local_chunk_pallets
+            else:
+                pallet_count = grand_total_pallets
 
-                 # --- Footer Pallet Count --- (Configurable Column) ---
-                 # Determine which pallet count to display (logic remains the same)
-                 pallets_to_display = -1 # Default to error/skip state
-                 if data_source_type == 'processed_tables': #
-                     pallets_to_display = local_chunk_pallets # Use count local to this table
-                 elif data_source_type in ['aggregation', 'fob_aggregation']: #
-                     pallets_to_display = grand_total_pallets # Use the overall grand total passed in
-                 else: #
-                     print(f"Warning: Unknown data_source_type '{data_source_type}' for pallet footer.") #
-
-                 # Determine the target column for the footer pallet count from config
-                 footer_pallet_header = sheet_config.get("footer_pallet_count_column_header") # Get header name from config
-                 footer_pallet_col_idx = None # Initialize column index
-
-                 if footer_pallet_header: # If a header name was provided in config
-                     footer_pallet_col_idx = column_map.get(footer_pallet_header) # Find its index
-                     if footer_pallet_col_idx is None: # If header from config wasn't found in the sheet
-                         print(f"Warning: Configured footer pallet count header '{footer_pallet_header}' not found. Falling back to description column.")
-                         footer_pallet_col_idx = desc_col_idx # Fallback 1: Use Description column index
-                 else:
-                     # No specific config provided, default to Description column index
-                     footer_pallet_col_idx = desc_col_idx
-
-                 # Write the pallet count if the count is valid AND we found a valid column index
-                 if footer_pallet_col_idx is not None and pallets_to_display >= 0: #
-                     try:
-                         # Use the determined footer_pallet_col_idx
-                         pallet_cell = worksheet.cell(row=footer_row_final, column=footer_pallet_col_idx) # Use the determined index
-                         pallet_cell.value = f"{pallets_to_display} PALLETS" #
-                         pallet_cell.font = effective_header_font #
-                         pallet_cell.alignment = effective_header_align #
-                     except Exception as e: #
-                         print(f"Warning: Error writing pallet count '{pallets_to_display}' to footer column {footer_pallet_col_idx}: {e}") # Updated warning
-                 elif footer_pallet_col_idx is None: # Only print warning if column index is truly invalid
-                     print(f"Warning: Cannot determine column for footer pallet count (Description column likely missing). Skipping.")
-                 # else: # Handles pallets_to_display < 0 (error calculating count)
-                     # Optionally clear the cell if needed
-                     # try:
-                     #     if footer_pallet_col_idx: worksheet.cell(row=footer_row_final, column=footer_pallet_col_idx).value = None
-                     # except: pass
-
-                 # --- Footer Border/Style --- 
-                 for c_idx in range(1, num_columns + 1):
-                     try:
-                         cell = worksheet.cell(row=footer_row_final, column=c_idx); 
-                         footer_header = idx_to_header_map.get(c_idx) 
-                         apply_grid_footer = footer_header and footer_header in columns_to_grid 
-                         top_border_side = thin_side; bottom_border_side = thin_side
-                         
-                         # Apply border first
-                         if c_idx == col1_index: 
-                             cell.border = Border(left=thin_side, right=thin_side, top=None, bottom=bottom_border_side)
-                         elif apply_grid_footer: 
-                             cell.border = thin_border
-                         else: 
-                             cell.border = Border(left=thin_side, right=thin_side, top=top_border_side, bottom=bottom_border_side)
-                         
-                         # Apply style MANUALLY for footer to preserve bold font but get number format
-                         if cell.value is not None:
-                             cell.font = effective_header_font 
-                             cell.alignment = effective_header_align 
-                             
-                             # Manually get and apply number format from config
-                             footer_number_format = None
-                             if sheet_styling_config and footer_header:
-                                 column_styles_cfg = sheet_styling_config.get("column_styles", {})
-                                 col_specific_style_cfg = column_styles_cfg.get(footer_header, {})
-                                 footer_number_format = col_specific_style_cfg.get("number_format")
-                             
-                             if footer_number_format and cell.number_format != FORMAT_TEXT:
-                                 try: cell.number_format = footer_number_format
-                                 except Exception: pass # Ignore errors applying format
-                             # Don't call _apply_cell_style here to avoid overwriting font/alignment
-                             
-                     except Exception as e: print(f"Warning: Error styling footer cell {c_idx}: {e}")
-             except Exception as fill_footer_err: print(f"Error during footer filling: {fill_footer_err}")
-
+            write_footer_row(
+                worksheet=worksheet,
+                footer_row_num=footer_row_final,
+                header_info=header_info,
+                sum_ranges=data_range_to_sum,
+                footer_config=footer_config,
+                pallet_count=pallet_count,
+                fob_mode=data_source_type == "fob_aggregation"
+            )
+    # No need to pass font, alignment, num_columns, etc. as the
+    # function gets this info from header_info and footer_config.
         # --- Apply Merges ---
         # Apply merges to row after header (if applicable)
         if add_blank_after_header and row_after_header_idx > 0 and merge_rules_after_header:
@@ -1580,55 +1749,6 @@ def fill_invoice_data(
         if frf_local > 0: fallback_row = max(fallback_row, frf_local + 1)
         else: est_footer = locals().get('initial_insert_point', fallback_row) + locals().get('total_rows_to_insert', 0); fallback_row = max(fallback_row, est_footer)
         return False, fallback_row, -1, -1, 0
-
-
-def find_cell_by_marker(worksheet: Worksheet, marker_text: str, search_range: Optional[str] = None) -> Optional[openpyxl.cell.Cell]:
-    """
-    Finds the first cell containing the exact marker text within a specified range or the entire sheet.
-
-    Args:
-        worksheet: The openpyxl Worksheet object.
-        marker_text: The exact string to search for in cell values.
-        search_range: Optional string defining the range (e.g., "A1:F10"). Searches entire sheet if None.
-
-    Returns:
-        The openpyxl Cell object if found, otherwise None.
-    """
-    if not marker_text: return None
-    cells_to_scan = None; search_description = "entire sheet"
-    if search_range:
-        try: cells_to_scan = worksheet[search_range]; search_description = f"range '{search_range}'"
-        except Exception as range_err: cells_to_scan = worksheet.iter_rows() # Fallback to full scan on range error
-    else: cells_to_scan = worksheet.iter_rows() # Default to full scan
-    marker_text_str = str(marker_text).strip() # Ensure marker is string and stripped
-
-    # Handle case where search_range might be a single cell
-    if isinstance(cells_to_scan, openpyxl.cell.Cell):
-        if cells_to_scan.value is not None and str(cells_to_scan.value).strip() == marker_text_str:
-            return cells_to_scan
-        else:
-            return None # Single cell didn't match
-
-    # Iterate through rows/cells
-    if cells_to_scan is not None:
-        try:
-            for row in cells_to_scan:
-                # Handle case where cells_to_scan is directly a tuple of cells (from worksheet[range])
-                if isinstance(row, openpyxl.cell.Cell):
-                    cell = row; # Treat the item itself as the cell
-                    # Skip merged cells unless it's the top-left origin
-                    if isinstance(cell, openpyxl.cell.cell.MergedCell): continue
-                    if cell.value is not None and str(cell.value).strip() == marker_text_str: return cell
-                else: # Assume row is an iterable of cells (from iter_rows)
-                    for cell in row:
-                        # Skip merged cells unless it's the top-left origin
-                        if isinstance(cell, openpyxl.cell.cell.MergedCell): continue
-                        if cell.value is not None and str(cell.value).strip() == marker_text_str: return cell
-        except Exception as iter_err:
-            # Log error if needed
-            return None
-    return None # Marker not found
-
 
 def apply_column_widths(worksheet: Worksheet, sheet_styling_config: Optional[Dict[str, Any]], header_map: Optional[Dict[str, int]]):
     """
@@ -1727,4 +1847,5 @@ def apply_row_heights(worksheet: Worksheet, sheet_styling_config: Optional[Dict[
 # --- Main Execution Guard --- (Keep existing)
 if __name__ == "__main__":
     print("invoice_utils.py executed directly.")
-    pass
+
+   
