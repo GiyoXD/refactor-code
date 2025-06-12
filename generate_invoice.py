@@ -578,6 +578,7 @@ def main():
                 # ***** END INITIALIZE *****
  
                 # ***** REMOVED REDUNDANT PRE-CALCULATION LOOP - NOW DONE GLOBALLY *****
+                last_table = table_keys[-1]
  
                 # --- V11: Main loop now only writes data, doesn't insert --- # TODO urgent
                 for i, table_key in enumerate(table_keys):
@@ -666,7 +667,7 @@ def main():
                 # --- End Table Loop ---
  
                 # ***** ADD GRAND TOTAL ROW (for multi-table summary) *****
-                    if processing_successful and num_tables > 1:
+                    if processing_successful and num_tables > 1 and last_table==table_key:
                         grand_total_row_num = write_pointer_row
                         print(f"\n--- Adding Grand Total Row at index {grand_total_row_num} using write_footer_row ---")
                         try:
@@ -699,7 +700,7 @@ def main():
                 # --- V11: Logic for Summary Rows (BUFFALO summary + blank) ---
                 summary_flag = sheet_mapping_section.get("summary", False)
                 sheet_inner_mapping_rules_dict = sheet_mapping_section.get('mappings', {})
-                if summary_flag and processing_successful and last_table_header_info:
+                if summary_flag and processing_successful and last_table_header_info and args.fob:
                     # Get the footer config to pass its styles to the summary writer
                     footer_config_for_summary = sheet_mapping_section.get("footer_configurations", {})
                     
