@@ -796,148 +796,149 @@ def prepare_data_rows(
     static_value_map: Dict[int, Any]
 ) -> Tuple[List[Dict[int, Any]], List[int], bool, int]:
     """
-    Prepares data rows by mapping source data to columns based on their IDs.
-    This version standardizes the processing logic for different data source types.
+    Final Corrected Version: Removes the redundant parsing of custom_aggregation keys.
     """
     data_rows_prepared = []
     pallet_counts_for_rows = []
     dynamic_desc_used = False
     num_data_rows_from_source = 0
     
-    # These column IDs expect numeric data and will be converted automatically.
-    NUMERIC_IDS = {
-        "col_qty_pcs", "col_qty_sf", "col_unit_price", "col_amount",
-        "col_net", "col_gross", "col_cbm"
-    }
+    NUMERIC_IDS = {"col_qty_pcs", "col_qty_sf", "col_unit_price", "col_amount", "col_net", "col_gross", "col_cbm"}
 
-    # --- Handler for 'processed_tables' ---
-    # This handles a single table's data, often used in a loop for multi-table sheets.
-    if data_source_type == 'processed_tables':
-        table_data = data_source or {}
-        if isinstance(table_data, dict):
-            # Determine the number of rows by the longest list in the data
-            max_len = 0
-            for value in table_data.values():
-                if isinstance(value, list):
-                    max_len = max(max_len, len(value))
+    # --- Handler for FOB Aggregation ---
+    if data_source_type == 'fob_aggregation':
+        fob_data = data_source or {}
+        num_data_rows_from_source = len(fob_data)
+        id_to_data_key_map = {"col_po": "combined_po", "col_item": "combined_item", "col_desc": "combined_description", "col_qty_sf": "total_sqft", "col_amount": "total_amount"}
+        price_col_idx = column_id_map.get("col_unit_price")
+        for row_key in sorted(fob_data.keys()):
+            row_value_dict = fob_data.get(row_key, {})
+            row_dict = {}
+            for col_id, data_key in id_to_data_key_map.items():
+                target_col_idx = column_id_map.get(col_id)
+                if target_col_idx:
+                    row_dict[target_col_idx] = _to_numeric(row_value_dict.get(data_key))
+            if price_col_idx:
+                row_dict[price_col_idx] = {"type": "formula", "template": "{col_ref_1}{row}/{col_ref_0}{row}", "inputs": ["col_qty_sf", "col_amount"]}
+            data_rows_prepared.append(row_dict)
+
+    # --- Handler for Custom Aggregation ---
+# ... inside the prepare_data_rows function
+    elif data_source_type == 'custom_aggregation':
+        custom_data = data_source or {}
+        num_data_rows_from_source = len(custom_data)
+        price_col_idx = column_id_map.get("col_unit_price")
+
+        # <<< FIX: Loop directly over the items. The key is already a tuple. >>>
+        for key_tuple, value_dict in custom_data.items():
+            row_dict = {}
+            # Ensure the key is a tuple before trying to access indices
+            if not isinstance(key_tuple, tuple) or len(key_tuple) < 4:
+                print(f"Warning: Skipping malformed custom aggregation key: {key_tuple}")
+                continue
             
-            num_data_rows_from_source = max_len
+            # Map data from the key tuple
+            row_dict[column_id_map.get("col_po")] = key_tuple[0]
+            row_dict[column_id_map.get("col_item")] = key_tuple[1]
             
-            # Prepare pallet counts for each row
-            raw_pallet_counts = table_data.get("pallet_count", [])
-            pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts)) if isinstance(raw_pallet_counts, list) else [0] * max_len
+            # --- REVISED LOGIC FOR DYNAMIC DESCRIPTION ---
+            desc_col_idx = column_id_map.get("col_desc")
+            if desc_col_idx:
+                # Get the potential description value from the source tuple
+                desc_value = key_tuple[3]
+                row_dict[desc_col_idx] = desc_value
+                # Only set the flag if the value is meaningful (not None, not empty/whitespace)
+                if desc_value and str(desc_value).strip():
+                    dynamic_desc_used = True
+            
+            # Map data from the value dictionary
+            row_dict[column_id_map.get("col_qty_sf")] = _to_numeric(value_dict.get("sqft_sum"))
+            row_dict[column_id_map.get("col_amount")] = _to_numeric(value_dict.get("amount_sum"))
 
-            # Iterate through each row index
-            for i in range(max_len):
-                row_dict = {}
-                # Iterate through the mapping rules to build the row
-                for data_key, mapping_rule in dynamic_mapping_rules.items():
-                    target_id = mapping_rule.get("id")
-                    target_col_idx = column_id_map.get(target_id)
-                    
-                    if target_col_idx:
-                        source_list = table_data.get(data_key, [])
-                        data_value = source_list[i] if i < len(source_list) else None
-                        
-                        # Convert to number if the column ID is marked as numeric
-                        if target_id in NUMERIC_IDS:
-                            data_value = _to_numeric(data_value)
-                            
-                        # Add value to row if it's not empty, otherwise check for a fallback
-                        is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
-                        if not is_empty:
-                            row_dict[target_col_idx] = data_value
-                            if target_col_idx == desc_col_idx: 
-                                dynamic_desc_used = True
-                        elif "fallback_on_none" in mapping_rule:
-                            row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
-                
-                data_rows_prepared.append(row_dict)
+            # Add the formula hint for the Unit Price column
+            if price_col_idx:
+                row_dict[price_col_idx] = {"type": "formula", "template": "{col_ref_1}{row}/{col_ref_0}{row}", "inputs": ["col_qty_sf", "col_amount"]}
+            
+            data_rows_prepared.append(row_dict)
 
-    # --- Handler for 'aggregation' (e.g., standard or custom invoice) ---
+    # --- Handler for Normal Aggregation ---
     elif data_source_type == 'aggregation':
         aggregation_data = data_source or {}
-        num_data_rows_from_source = len(aggregation_data) if isinstance(aggregation_data, dict) else 0
-        # Each aggregated row is treated as its own group/pallet conceptually
-        pallet_counts_for_rows = [1] * num_data_rows_from_source 
-
+        num_data_rows_from_source = len(aggregation_data)
+        amount_col_idx = column_id_map.get("col_amount")
         if num_data_rows_from_source > 0:
             for key_tuple, value_dict in aggregation_data.items():
                 row_dict = {}
-                # Iterate through mapping rules to find where to place the data
                 for mapping_rule in dynamic_mapping_rules.values():
                     target_id = mapping_rule.get("id")
                     target_col_idx = column_id_map.get(target_id)
-                    if not target_col_idx: 
-                        continue
-                    
+                    if not target_col_idx: continue
                     data_value = None
-                    # Data can come from the aggregation key (e.g., PO number)
-                    if 'key_index' in mapping_rule:
-                        key_index = mapping_rule['key_index']
-                        if isinstance(key_tuple, tuple) and 0 <= key_index < len(key_tuple):
-                             data_value = key_tuple[key_index]
-                    # Or from the aggregation values (e.g., sum of SQFT)
-                    elif 'value_key' in mapping_rule:
-                        value_key = mapping_rule['value_key']
-                        if isinstance(value_dict, dict): 
-                            data_value = value_dict.get(value_key)
-                    
-                    if target_id in NUMERIC_IDS:
-                        data_value = _to_numeric(data_value)
-
-                    is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
-                    if not is_empty:
+                    if 'key_index' in mapping_rule and isinstance(key_tuple, tuple) and mapping_rule['key_index'] < len(key_tuple):
+                        data_value = key_tuple[mapping_rule['key_index']]
+                    elif 'value_key' in mapping_rule and isinstance(value_dict, dict):
+                        data_value = value_dict.get(mapping_rule['value_key'])
+                    if target_id in NUMERIC_IDS: data_value = _to_numeric(data_value)
+                    if data_value is not None:
                         row_dict[target_col_idx] = data_value
-                        if target_col_idx == desc_col_idx: 
-                            dynamic_desc_used = True
+                        if target_col_idx == desc_col_idx: dynamic_desc_used = True
                     elif "fallback_on_none" in mapping_rule:
                         row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
-                
+                if amount_col_idx:
+                    row_dict[amount_col_idx] = {"type": "formula", "template": "{col_ref_1}{row}*{col_ref_0}{row}", "inputs": ["col_qty_sf", "col_unit_price"]}
                 data_rows_prepared.append(row_dict)
 
-    # --- Handler for 'fob_aggregation' ---
-    elif data_source_type == 'fob_aggregation':
-        fob_data = data_source or {}
-        num_data_rows_from_source = len(fob_data) if isinstance(fob_data, dict) else 0
-        pallet_counts_for_rows = [0] * num_data_rows_from_source # FOB sheets don't use pallet counts
-        
-        if num_data_rows_from_source > 0:
-            # Sort keys to ensure consistent order
-            sorted_keys = sorted(fob_data.keys(), key=lambda k: int(k) if k.isdigit() else float('inf'))
-            
-            for row_key in sorted_keys:
-                row_value_dict = fob_data.get(row_key, {})
+    # --- Handler for Processed Tables (e.g., Packing List) ---
+    elif data_source_type == 'processed_tables':
+        table_data = data_source or {}
+        if isinstance(table_data, dict):
+            max_len = max((len(v) for v in table_data.values() if isinstance(v, list)), default=0)
+            num_data_rows_from_source = max_len
+            raw_pallet_counts = table_data.get("pallet_count", [])
+            pallet_counts_for_rows = raw_pallet_counts[:max_len] + [0] * (max_len - len(raw_pallet_counts)) if isinstance(raw_pallet_counts, list) else [0] * max_len
+            for i in range(max_len):
                 row_dict = {}
-                # Iterate through rules to map values like 'combined_po', 'total_sqft', etc.
                 for data_key, mapping_rule in dynamic_mapping_rules.items():
                     target_id = mapping_rule.get("id")
                     target_col_idx = column_id_map.get(target_id)
-                    if not target_col_idx: 
-                        continue
-                    
-                    value = row_value_dict.get(data_key)
-                    
-                    if target_id in NUMERIC_IDS:
-                        value = _to_numeric(value)
-                        
-                    if value is not None:
-                        row_dict[target_col_idx] = value
-                
+                    if target_col_idx:
+                        source_list = table_data.get(data_key, [])
+                        data_value = source_list[i] if i < len(source_list) else None
+                        if target_id in NUMERIC_IDS: data_value = _to_numeric(data_value)
+                        is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
+                        if not is_empty:
+                            row_dict[target_col_idx] = data_value
+                            if target_col_idx == desc_col_idx: dynamic_desc_used = True
+                        elif "fallback_on_none" in mapping_rule:
+                            row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
                 data_rows_prepared.append(row_dict)
-
-    # --- Final Processing Steps for all data types ---
-    # Apply any hardcoded static values to every row
+    
+    # --- Final Processing Steps ---
     if static_value_map:
         for row_data in data_rows_prepared:
             for col_idx, static_val in static_value_map.items():
-                if col_idx not in row_data:
-                    row_data[col_idx] = static_val
-                    
-    # Ensure there are enough rows to accommodate the static labels (e.g., for Packing List)
+                if col_idx not in row_data: row_data[col_idx] = static_val
     if num_static_labels > len(data_rows_prepared):
         data_rows_prepared.extend([{}] * (num_static_labels - len(data_rows_prepared)))
+    
+     # --- Centralized Check for Dynamic Description ---
+    # This single block runs after the data is prepared, regardless of source.
+    dynamic_desc_used = False
+    desc_col_idx = column_id_map.get("col_desc")
+    if desc_col_idx:
+        for row_data in data_rows_prepared:
+            desc_value = row_data.get(desc_col_idx)
+            # If a meaningful description is found, set the flag and stop checking.
+            if desc_value and str(desc_value).strip():
+                dynamic_desc_used = True
+                break
 
+    # --- Final Processing Steps ---
+    if static_value_map:
+        for row_data in data_rows_prepared:
+            for col_idx, static_val in static_value_map.items():
+                if col_idx not in row_data: row_data[col_idx] = static_val
+        
     return data_rows_prepared, pallet_counts_for_rows, dynamic_desc_used, num_data_rows_from_source
 
 
@@ -1274,7 +1275,7 @@ def write_footer_row(
                     cell.font = font_to_apply
                     cell.alignment = align_to_apply
                     
-                    # Apply Number Formatting from Config
+                    # Apply Number Formatting from Config if fob
                     number_format_str = number_format_config.get(col_id)
                     if number_format_str and fob_mode:
                         cell.number_format = "##0.00"
@@ -1511,7 +1512,7 @@ def fill_invoice_data(
         total_rows_to_insert += 1 # Add 1 for the footer itself
 
         # --- Bulk Insert Rows --- # V11: Only insert if NOT pre-inserted by caller (i.e., for single-table modes)
-        if data_source_type in ['aggregation', 'fob_aggregation']:
+        if data_source_type in ['aggregation', 'fob_aggregation', "custom_aggregation"]:
             if total_rows_to_insert > 0:
                 try:
                     worksheet.insert_rows(data_writing_start_row, amount=total_rows_to_insert)
@@ -1581,12 +1582,15 @@ def fill_invoice_data(
                     
                     # --- Priority 2: Handle Regular Data Rows ---
                     else:
-                        # Check for a formula rule first
-                        if c_idx in formula_rules:
-                            rule = formula_rules[c_idx]
-                            formula_template = rule["template"]
-                            input_ids = rule["input_ids"]
-                            
+                        # Get the value that was prepared by the "kitchen"
+                        prepared_value = row_data_dict.get(c_idx)
+                        value_to_write = None
+
+                        # First, check if the prepared value is a formula hint
+                        if isinstance(prepared_value, dict) and prepared_value.get("type") == "formula":
+                            rule = prepared_value
+                            formula_template = rule.get("template")
+                            input_ids = rule.get("inputs", [])
                             formula_params = {'row': target_row}
                             valid_inputs = True
                             for idx, input_id in enumerate(input_ids):
@@ -1596,20 +1600,23 @@ def fill_invoice_data(
                                 else:
                                     valid_inputs = False; break
                             
-                            value_to_write = f"={formula_template.format(**formula_params)}" if valid_inputs else "#REF!"
-
-                        # Check for special, hardcoded column behaviors
+                            if valid_inputs and formula_template:
+                                value_to_write = f"={formula_template.format(**formula_params)}"
+                            else:
+                                value_to_write = "#REF!"
+                        
+                        # If not a hint, check for your original special columns
                         elif c_idx == no_col_idx:
                             value_to_write = i + 1
                         elif c_idx == pallet_info_col_idx:
                             value_to_write = f"{display_pallet_order}-{local_chunk_pallets}"
-                        
-                        # Otherwise, get the value from the prepared data
-                        else:
-                            value_to_write = row_data_dict.get(c_idx)
-                        
-                        cell.value = value_to_write
 
+                        # If none of the above, it's just plain data
+                        else:
+                            value_to_write = prepared_value
+                        
+                        # Finally, write the chosen value to the cell once
+                        cell.value = value_to_write
                     # --- Apply Cell Styling and Formatting ---
                     if current_id in force_text_format_ids:
                         cell.number_format = FORMAT_TEXT

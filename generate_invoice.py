@@ -409,6 +409,175 @@ def pre_calculate_and_insert_rows(
     
     return True, 0 # Succeeded, but inserted 0 rows
 
+def process_single_table_sheet(
+    workbook: Any, # The openpyxl workbook object itself
+    worksheet: Worksheet,
+    sheet_name: str,
+    sheet_mapping_section: Dict[str, Any],
+    data_mapping_config: Dict[str, Any],
+    data_source_indicator: str,
+    invoice_data: Dict[str, Any],
+    args: argparse.Namespace,
+    final_grand_total_pallets: int
+) -> bool:
+    """
+    Processes a sheet configured as a single table or aggregation.
+
+    This includes writing the header, filling the main data table, applying styles and widths,
+    and performing data-driven text replacements.
+    Returns True on success, False on failure.
+    """
+    print(f"Processing sheet '{sheet_name}' as single table/aggregation.")
+    header_info = None
+    footer_info = None
+    sheet_inner_mapping_rules_dict = sheet_mapping_section.get('mappings', {})
+    sheet_styling_config = sheet_mapping_section.get("styling")
+
+    # Get flags and rules from the sheet's configuration
+    add_blank_after_hdr_flag = sheet_mapping_section.get("add_blank_after_header", False)
+    static_content_after_hdr_dict = sheet_mapping_section.get("static_content_after_header", {})
+    add_blank_before_ftr_flag = sheet_mapping_section.get("add_blank_before_footer", False)
+    static_content_before_ftr_dict = sheet_mapping_section.get("static_content_before_footer", {})
+    merge_rules_after_hdr = sheet_mapping_section.get("merge_rules_after_header", {})
+    merge_rules_before_ftr = sheet_mapping_section.get("merge_rules_before_footer", {})
+    merge_rules_footer = sheet_mapping_section.get("merge_rules_footer", {})
+    data_cell_merging_rules = sheet_mapping_section.get("data_cell_merging_rule", None)
+    final_row_spacing = sheet_mapping_section.get('row_spacing', 0)
+
+    start_row = sheet_mapping_section.get('start_row')
+    header_to_write = sheet_mapping_section.get('header_to_write')
+    if not start_row or not header_to_write:
+        print(f"Error: Config for '{sheet_name}' missing 'start_row' or 'header_to_write'. Skipping.")
+        return False
+
+    # Write the header based on the layout in the config file
+    print(f"Writing header at row {start_row}...")
+    header_info = invoice_utils.write_header(
+        worksheet, start_row, header_to_write, sheet_styling_config
+    )
+    if not header_info:
+        print(f"Error: Failed to write header for '{sheet_name}'. Skipping.")
+        return False
+    print("Header written successfully.")
+
+    # --- Get Data Source ---
+    data_to_fill = None
+    data_source_type = None
+    print(f"DEBUG: Retrieving data source for '{sheet_name}' using indicator: '{data_source_indicator}'")
+
+    # Logic to select the correct data source based on flags and config
+    if args.custom and data_source_indicator == 'aggregation':
+        data_to_fill = invoice_data.get('custom_aggregation_results')
+        data_source_type = 'custom_aggregation'
+
+    if data_to_fill is None:
+        if args.fob and sheet_name in ["Invoice", "Contract"]:
+            data_source_indicator = 'fob_aggregation'
+
+        if data_source_indicator == 'fob_aggregation':
+            data_to_fill = invoice_data.get('final_fob_compounded_result')
+            data_source_type = 'fob_aggregation'
+        elif data_source_indicator == 'aggregation':
+            data_to_fill = invoice_data.get('standard_aggregation_results')
+            data_source_type = 'aggregation'
+        elif 'processed_tables_data' in invoice_data and data_source_indicator in invoice_data.get('processed_tables_data', {}):
+            data_to_fill = invoice_data['processed_tables_data'].get(data_source_indicator)
+            data_source_type = 'processed_tables'
+
+    if data_to_fill is None:
+        print(f"Warning: Data source '{data_source_indicator}' unknown or data empty. Skipping fill.")
+        return True
+
+    if not header_info.get('column_map'):
+        print(f"Error: Cannot fill data for '{sheet_name}' because header_info or column_map is missing.")
+        return False
+
+    # Fill the main body of the table with data
+    fill_success, next_row_after_footer, _, _, _ = invoice_utils.fill_invoice_data(
+        worksheet=worksheet,
+        sheet_name=sheet_name,
+        sheet_config=sheet_mapping_section,
+        all_sheet_configs=data_mapping_config,
+        data_source=data_to_fill,
+        data_source_type=data_source_type,
+        header_info=header_info,
+        mapping_rules=sheet_inner_mapping_rules_dict,
+        sheet_styling_config=sheet_styling_config,
+        add_blank_after_header=add_blank_after_hdr_flag,
+        static_content_after_header=static_content_after_hdr_dict,
+        add_blank_before_footer=add_blank_before_ftr_flag,
+        static_content_before_footer=static_content_before_ftr_dict,
+        merge_rules_after_header=merge_rules_after_hdr,
+        merge_rules_before_footer=merge_rules_before_ftr,
+        merge_rules_footer=merge_rules_footer,
+        footer_info=footer_info, max_rows_to_fill=None,
+        grand_total_pallets=final_grand_total_pallets,
+        custom_flag=args.custom,
+        data_cell_merging_rules=data_cell_merging_rules
+    )
+
+    if not fill_success:
+        print(f"Failed to fill table data/footer for sheet '{sheet_name}'.")
+        return False
+    print(f"Successfully filled table data/footer for sheet '{sheet_name}'.")
+
+    # --- Post-fill processing ---
+
+    # Apply column widths as defined in the styling configuration
+    print(f"Applying column widths for sheet '{sheet_name}'...")
+    invoice_utils.apply_column_widths(
+        worksheet,
+        sheet_styling_config,
+        header_info.get('column_map')
+    )
+
+    # Insert final spacer rows if configured
+    if final_row_spacing >= 1:
+        try:
+            print(f"Config requests final spacing ({final_row_spacing}). Adding blank row(s) at {next_row_after_footer}.")
+            worksheet.insert_rows(next_row_after_footer, amount=final_row_spacing)
+        except Exception as final_spacer_err:
+            print(f"Warning: Failed to insert final spacer rows: {final_spacer_err}")
+
+    # Fill summary fields by finding cell markers
+    print("Attempting to fill summary fields...")
+    summary_data_source = invoice_data.get('final_fob_compounded_result', {})
+    if summary_data_source and sheet_inner_mapping_rules_dict:
+        for map_key, map_rule in sheet_inner_mapping_rules_dict.items():
+            if isinstance(map_rule, dict) and 'marker' in map_rule:
+                target_cell = invoice_utils.find_cell_by_marker(worksheet, map_rule['marker'])
+                summary_value = summary_data_source.get(map_key)
+                if target_cell and summary_value is not None:
+                    target_cell.value = summary_value
+
+    # Perform data-driven replacements (e.g., JFINV, JFTIME)
+    print("Performing data-driven replacements for single-table sheet...")
+    data_driven_replacement_rules = [
+        {"find": "JFINV", "data_path": ["processed_tables_data", "1", "inv_no", 0], "target_sheets": [sheet_name]},
+        {"find": "JFTIME", "data_path": ["processed_tables_data", "1", "inv_date", 0], "target_sheets": [sheet_name], "is_date": True},
+        {"find": "JFREF", "data_path": ["processed_tables_data", "1", "inv_ref", 0], "target_sheets": [sheet_name]}
+    ]
+    text_replace_utils.process_data_driven_replacements(
+        workbook, invoice_data, data_driven_replacement_rules
+    )
+
+    # Perform hardcoded text replacements if the --fob flag is active
+    if args.fob:
+        print(f":::::::::::::::::::: Performing FOB-specific hardcoded replacements for sheet '{sheet_name}'...")
+        fob_specific_replacement_rules = [
+            {"find": "DAP", "replace": "FOB", "case_sensitive": False},
+            {"find": "FCA", "replace": "FOB", "case_sensitive": False},
+            {"find": "BINH PHUOC", "replace": "BAVET", "case_sensitive": False, "exact_cell_match": True},
+            {"find": "BAVET, SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True}
+        ]
+        text_replace_utils.find_and_replace_in_workbook(
+            workbook=workbook,
+            replacement_rules=fob_specific_replacement_rules,
+            target_sheets=[sheet_name]
+        )
+        print(f":::::::::::::::::::: Finished FOB-specific hardcoded replacements for sheet '{sheet_name}'.")
+
+    return True
 
 
 # --- Main Orchestration Logic ---
@@ -667,7 +836,7 @@ def main():
                 # --- End Table Loop ---
  
                 # ***** ADD GRAND TOTAL ROW (for multi-table summary) *****
-                    if processing_successful and num_tables > 1 and last_table==table_key:
+                    if processing_successful and num_tables > 1 and last_table==i:
                         grand_total_row_num = write_pointer_row
                         print(f"\n--- Adding Grand Total Row at index {grand_total_row_num} using write_footer_row ---")
                         try:
@@ -781,361 +950,17 @@ def main():
             # --- Handle Single Table / Aggregation Case ---
             # ================================================================
             else:
-                print(f"Processing sheet '{sheet_name}' as single table/aggregation.")
-                header_info = None; footer_info = None
-
-                start_row = sheet_mapping_section.get('start_row');
-                header_to_write = sheet_mapping_section.get('header_to_write');
-                if not start_row or not header_to_write: print(f"Error: Config for '{sheet_name}' missing 'start_row' or 'header_to_write'. Skipping."); processing_successful = False; continue
-
-                print(f"Writing header at row {start_row}...");
-                header_info = invoice_utils.write_header(
-                    worksheet, start_row, header_to_write, sheet_styling_config
+                processing_successful = process_single_table_sheet(
+                    workbook=workbook,
+                    worksheet=worksheet,
+                    sheet_name=sheet_name,
+                    sheet_mapping_section=sheet_mapping_section,
+                    data_mapping_config=data_mapping_config,
+                    data_source_indicator=data_source_indicator,
+                    invoice_data=invoice_data,
+                    args=args,
+                    final_grand_total_pallets=final_grand_total_pallets
                 )
-                if not header_info: print(f"Error: Failed to write header for '{sheet_name}'. Skipping."); processing_successful = False; continue
-                print(f"DEBUG: Header Info for '{sheet_name}':")
-                print(f"  - Column Map: {header_info.get('column_map')}")
-                print(f"Header written successfully.")
-
-                # --- Get Data Source ---
-                data_to_fill = None; data_source_type = None
-                print(f"DEBUG: Retrieving data source for '{sheet_name}' using indicator: '{data_source_indicator}'")
-
-                # --- Custom Flag Logic ---
-                if args.custom and data_source_indicator == 'aggregation':
-                    print(f"DEBUG: --custom flag active. Attempting to use 'custom_aggregation_results' for sheet '{sheet_name}'.")
-                    data_to_fill = invoice_data.get('custom_aggregation_results')
-                    data_source_type = 'aggregation' # Type remains aggregation
-                    if data_to_fill is not None:
-                        print("DEBUG: Successfully retrieved 'custom_aggregation_results'.")
-                    else:
-                        print("Warning: 'custom_aggregation_results' key not found in data, despite --custom flag.")
-                # --- End Custom Flag Logic ---
-
-                # --- Standard Data Source Selection (if not overridden by --custom) ---
-                if data_to_fill is None: # Only proceed if custom logic didn't already set it
-                    if data_source_indicator == 'fob_aggregation': # Check for FOB first
-                        data_to_fill = invoice_data.get('final_fob_compounded_result'); data_source_type = 'fob_aggregation';
-                        print("DEBUG: Using 'final_fob_compounded_result' data (FOB mode).")
-                        
-                        # Add mapping for combined_description to Description column
-                        if isinstance(data_to_fill, dict):
-                            for map_key, map_rule in sheet_inner_mapping_rules_dict.items():
-                                if isinstance(map_rule, dict):
-                                    header = map_rule.get('header')
-                                    if header in ['Description', 'DESCRIPTION OF GOODS', 'Description of Goods']:
-                                        # Override any existing mapping to use combined_description
-                                        map_rule['value_key'] = 'combined_description'
-                                        print(f"DEBUG: FOB Mode - Mapped combined_description to {header}")
-                    elif data_source_indicator == 'aggregation': # Standard aggregation
-                        data_to_fill = invoice_data.get('standard_aggregation_results'); data_source_type = 'aggregation';
-                        print("DEBUG: Using 'standard_aggregation_results' data.")
-                    elif 'processed_tables_data' in invoice_data and data_source_indicator in invoice_data.get('processed_tables_data', {}):
-                        data_to_fill = invoice_data['processed_tables_data'].get(data_source_indicator); data_source_type = 'processed_tables';
-                        print(f"DEBUG: Using 'processed_tables_data' key '{data_source_indicator}' (Likely for multi-table).")
-                    else:
-                        print(f"DEBUG: Data source indicator '{data_source_indicator}' not found in expected locations ('final_fob_compounded_result', 'standard_aggregation_results', 'custom_aggregation_results' or 'processed_tables_data').")
-                # --- End Standard Data Source Selection ---
-
-                if data_to_fill is None: print(f"Warning: Data source '{data_source_indicator}' unknown or data empty. Skipping fill."); continue
-
-                # *** Explicitly re-check header_info before the call ***
-                # header_info = written_header_info # Re-assign just in case (Use the variable name from the write_header call if different)
-                # Let's assume the variable was indeed header_info
-                if header_info is None:
-                    print(f"FATAL DEBUG: header_info is unexpectedly None right before calling fill_invoice_data for {sheet_name}")
-
-                if header_info is not None and header_info.get('column_map'):
-                    print(f"DEBUG: Calling fill_invoice_data for single table '{sheet_name}'")
-                    print(f"DEBUG: header_info passed to fill_invoice_data: {header_info}") # <--- SHOWS None HERE
-                    # *** Get aggregated FOB values ---
-                    total_sqft = data_to_fill.get('total_sqft', 0)
-                    total_amount = data_to_fill.get('total_amount', 0)
-                    combined_po = data_to_fill.get('combined_po')
-                    combined_item = data_to_fill.get('combined_item')
-                    combined_description = data_to_fill.get('combined_description')
-
-                    # *** Map headers to data source keys and find target columns ---
-                    fob_data_keys = {
-                        'P.O N °': 'combined_po', 'P.O Nº': 'combined_po',
-                        'ITEM NO': 'combined_item', 'ITEM Nº': 'combined_item',
-                        'Quantity ( SF )': 'total_sqft', 'Quantity(SF)': 'total_sqft',
-                        'Amount ( USD )': 'total_amount', 'Total value(USD)': 'total_amount',
-                        'Description': 'combined_description', 'DESCRIPTION OF GOODS': 'combined_description',
-                        'Description of Goods': 'combined_description', "Description Of Goods": 'combined_item'
-                    }
-
-                    # ***** MODIFIED CALL for single table (Removed starting_pallet_order, adjusted return) *****
-                    fill_success, next_row_after_footer, dog, _, table_pallets = invoice_utils.fill_invoice_data(
-                        worksheet=worksheet,
-                        sheet_name=sheet_name,
-                        sheet_config=sheet_mapping_section, # Pass current sheet's config
-                        all_sheet_configs=data_mapping_config, # <--- Pass the full config map
-                        data_source=data_to_fill,
-                        data_source_type=data_source_type,
-                        header_info=header_info,
-                        mapping_rules=sheet_inner_mapping_rules_dict,
-                        sheet_styling_config=sheet_styling_config,
-                        add_blank_after_header=add_blank_after_hdr_flag,
-                        static_content_after_header=static_content_after_hdr_dict,
-                        add_blank_before_footer=add_blank_before_ftr_flag,
-                        static_content_before_footer=static_content_before_ftr_dict,
-                        merge_rules_after_header=merge_rules_after_hdr,
-                        merge_rules_before_footer=merge_rules_before_ftr,
-                        merge_rules_footer=merge_rules_footer,
-                        footer_info=footer_info, max_rows_to_fill=None,
-                        grand_total_pallets=final_grand_total_pallets,
-                        custom_flag=args.custom,
-                        data_cell_merging_rules=data_cell_merging_rules
-                    )
-                    # ***** END MODIFIED CALL *****
-                    
-                    # Initialize sheet_grand_totals dictionary
-                    sheet_grand_totals = {
-                        "grand_total_nett_weight": 0.0,
-                        "grand_total_gross_weight": 0.0,
-                        "grand_total_cbm": 0.0,  # <-- STEP 1: ADDED NEW KEY FOR CBM
-                        # Add other totals needed for rows_after_footer here
-                    }
-
-                    # This block calculates totals if the sheet is a multi-table sheet (e.g. Packing List)
-                    # and these totals are then used by write_configured_rows.
-                    # The condition `processing_successful and all_tables_data` applies.
-                    # `all_tables_data` is typically `invoice_data.get('processed_tables_data', {})`
-                    # `table_keys` are the sorted keys from `all_tables_data`
-                    if processing_successful and all_tables_data: # This condition might be more relevant for multi-table sheets
-                        print("Calculating totals for rows_after_footer...")
-                        for table_key in table_keys: # table_keys would be derived from all_tables_data
-                            table_data = all_tables_data.get(str(table_key))
-                            if table_data and isinstance(table_data, dict):
-                                try:
-                                    # Summing 'net' values - ensure 'net' exists and contains numbers
-                                    nett_weights = table_data.get("net", [])
-                                    if isinstance(nett_weights, list):
-                                        sheet_grand_totals["grand_total_nett_weight"] += sum(
-                                            float(nw) for nw in nett_weights 
-                                            if isinstance(nw, (int, float, str)) and str(nw).strip() # Check if convertible
-                                        )
-                                except (ValueError, TypeError) as e:
-                                    print(f"Warning: Error summing nett weights for table {table_key}: {e}")
-                                try:
-                                    # Summing 'gross' values - ensure 'gross' exists and contains numbers
-                                    gross_weights = table_data.get("gross", [])
-                                    if isinstance(gross_weights, list):
-                                        sheet_grand_totals["grand_total_gross_weight"] += sum(
-                                            float(gw) for gw in gross_weights 
-                                            if isinstance(gw, (int, float, str)) and str(gw).strip() # Check if convertible
-                                        )
-                                except (ValueError, TypeError) as e:
-                                    print(f"Warning: Error summing gross weights for table {table_key}: {e}")
-                                
-                                # --- STEP 2: ADDED CALCULATION LOGIC FOR CBM ---
-                                try:
-                                    # Summing 'cbm' values - ensure 'cbm' exists and contains numbers
-                                    cbm_values = table_data.get("cbm", []) # Assuming 'cbm' is the key in your data
-                                    if isinstance(cbm_values, list):
-                                        sheet_grand_totals["grand_total_cbm"] += sum(
-                                            float(cbm_val) for cbm_val in cbm_values 
-                                            if isinstance(cbm_val, (int, float, str)) and str(cbm_val).strip() # Check if convertible
-                                        )
-                                except (ValueError, TypeError) as e:
-                                    print(f"Warning: Error summing CBM for table {table_key}: {e}")
-                                # --- END STEP 2 ---
-
-                        print(f"Calculated Sheet Grand Totals: {sheet_grand_totals}")
-                        
-                        # This part calls write_configured_rows. 
-                        # Ensure last_table_header_info is relevant or use header_info for single table sheets.
-                        # For single table sheets, header_info should be used.
-                        # The write_pointer_row also needs to be correctly set. For single table, it would be next_row_after_footer.
-                        
-                        current_header_info_for_rows_after_footer = header_info # For single table sheets
-                        current_write_pointer_for_rows_after_footer = next_row_after_footer
-
-                        # If this logic is inside the "processed_tables_multi" part of your script, 
-                        # then last_table_header_info and write_pointer_row (as updated by the multi-table loop) would be correct.
-                        # The provided snippet seems to be from the single-table processing path due to `next_row_after_footer`.
-
-                        if processing_successful and current_header_info_for_rows_after_footer:
-                            rows_after_footer_enabled = sheet_mapping_section.get("rows_after_footer_enabled", False)
-                            rows_after_footer_config = sheet_mapping_section.get("rows_after_footer", [])
-                            
-                            if rows_after_footer_enabled and isinstance(rows_after_footer_config, list) and len(rows_after_footer_config) > 0:
-                                num_extra_rows = len(rows_after_footer_config)
-                                
-                                # For single-table sheets, insert rows if they are not already accounted for.
-                                # This depends on whether fill_invoice_data already inserted space for these.
-                                # Typically, fill_invoice_data inserts rows up to its own footer.
-                                # So, rows *after* that footer need to be inserted if not already planned.
-                                # However, write_configured_rows assumes rows are ALREADY INSERTED.
-                                # So, you might need to insert rows *before* calling write_configured_rows.
-
-                                print(f"DEBUG: Preparing to write {num_extra_rows} rows after footer, starting at potential row {current_write_pointer_for_rows_after_footer}")
-                                print(f"DEBUG: Using header_info: {current_header_info_for_rows_after_footer.get('num_columns')} columns")
-                                print(f"DEBUG: Calculated totals for these rows: {sheet_grand_totals}")
-                                if num_extra_rows > 0: 
-                                    print(f"DEBUG: Inserting {num_extra_rows} rows at {current_write_pointer_for_rows_after_footer} for 'rows_after_footer'.")
-                                    worksheet.insert_rows(current_write_pointer_for_rows_after_footer, amount=num_extra_rows)
-                                    # Unmerge the newly inserted block to prevent styling/merge issues
-                                    invoice_utils.safe_unmerge_block(
-                                        worksheet, 
-                                        current_write_pointer_for_rows_after_footer, 
-                                        current_write_pointer_for_rows_after_footer + num_extra_rows - 1, 
-                                        current_header_info_for_rows_after_footer['num_columns']
-                                    )
-                                    print(f"DEBUG: Inserted and unmerged {num_extra_rows} rows.")
-                                else:
-                                    print("DEBUG: No extra rows configured in 'rows_after_footer', no insertion needed.")
-
-                                invoice_utils.write_configured_rows( 
-                                    worksheet=worksheet,
-                                    start_row_index=current_write_pointer_for_rows_after_footer, # This should be the row where these new lines start
-                                    num_columns=current_header_info_for_rows_after_footer['num_columns'],
-                                    rows_config_list=rows_after_footer_config,
-                                    calculated_totals=sheet_grand_totals, 
-                                    default_style_config=sheet_styling_config
-                                )
-                                next_row_after_footer = next_row_after_footer + 2
-
-                                # Update the pointer if you were managing it manually for subsequent operations on this sheet
-                                # current_write_pointer_for_rows_after_footer += num_extra_rows 
-                                # next_row_after_footer = current_write_pointer_for_rows_after_footer # If this is the very end of sheet processing
-
-                                print(f"DEBUG: Finished writing rows after footer. The next available row would conceptually be after these {num_extra_rows} rows.")
-                    
-                    
-
-
-                    if fill_success:
-                        print(f"Successfully filled table data/footer for sheet '{sheet_name}'.")
-
-                        # --- Apply Column Widths AFTER filling ---
-                        print(f"Applying column widths for sheet '{sheet_name}'...")
-                        invoice_utils.apply_column_widths(
-                            worksheet,
-                            sheet_styling_config,
-                            header_info.get('column_map')
-                        )
-                        # --- End Apply Column Widths ---
-
-                        # --- Final Spacer Rows --- (Existing logic)
-                        if final_row_spacing >= 1:
-                            final_spacer_start_row = next_row_after_footer
-                            try:
-                                print(f"Config requests final spacing ({final_row_spacing}). Adding blank row(s) at {final_spacer_start_row}.")
-                                worksheet.insert_rows(final_spacer_start_row, amount=final_row_spacing)
-                            except Exception as final_spacer_err: print(f"Warning: Failed to insert final spacer rows: {final_spacer_err}")
-
-                        # --- Fill Summary Fields --- (Existing logic)
-                        print("Attempting to fill summary fields...")
-                        summary_data_source = invoice_data.get('final_fob_compounded_result', {})
-                        if not summary_data_source: print("Warning: 'final_fob_compounded_result' not found.")
-                        elif not sheet_inner_mapping_rules_dict: print("Warning: 'mappings' dict not found for summary fields.")
-                        else:
-                            summary_fields_found = 0
-                            for map_key, map_rule in sheet_inner_mapping_rules_dict.items():
-                                if isinstance(map_rule, dict) and 'marker' in map_rule:
-                                    marker_text = map_rule['marker']; summary_value = summary_data_source.get(map_key)
-                                    if not marker_text: print(f"Warning: Marker text missing for summary key '{map_key}'."); continue
-                                    if summary_value is None: print(f"Warning: Summary value for key '{map_key}' not found."); continue
-                                    target_cell = invoice_utils.find_cell_by_marker(worksheet, marker_text)
-                                    if target_cell:
-                                        summary_fields_found += 1
-                                        try: # Format as number if possible
-                                            summary_value_num = float(summary_value);
-                                            target_cell.value = summary_value_num; target_cell.number_format = '#,##0.00' # Default summary format
-                                            print(f"Wrote summary {summary_value_num:.2f} to {target_cell.coordinate} ('{marker_text}')")
-                                        except (ValueError, TypeError): # Fallback to string
-                                            target_cell.value = str(summary_value)
-                                            print(f"Wrote summary '{summary_value}' as string to {target_cell.coordinate} ('{marker_text}')")
-                            if summary_fields_found == 0: print("No summary field markers found/matched.")
-                            else: print(f"Processed {summary_fields_found} summary field(s).")
-
-                        # --- Define and Apply Data-Driven Replacements HERE (Inside single-table loop) ---
-                        print("Performing data-driven replacements for single-table sheet...")
-                        # Define rules here: placeholder text, path to data within invoice_data, target sheets
-                        # NOTE: Target sheets here might be redundant if we only apply to the *current* sheet
-                        # Consider refining rules if replacement should only apply to the sheet being processed.
-                        data_driven_replacement_rules = [
-                            {
-                                "find": "JFINV",
-                                "data_path": ["processed_tables_data", "1", "inv_no", 0], # Path within invoice_data
-                                "target_sheets": ["Invoice", "Contract", "Packing list"], # Apply ONLY to current sheet
-                                "case_sensitive": True
-                            },
-                            {
-                                "find": "JFTIME",
-                                "data_path": ["processed_tables_data", "1", "inv_date", 0], # Corrected path based on JF.json analysis
-                                "target_sheets": ["Invoice", "Contract", "Packing list"], # Apply ONLY to current sheet
-                                "case_sensitive": True,
-                                "is_date": True  # Mark this as a date field for special handling
-                            },
-                            {
-                                "find": "JFREF",
-                                # IMPORTANT: Determine the CORRECT key for reference from JF.json
-                                # Using 'reference_code' as a placeholder - CHANGE IF WRONG
-                                "data_path": ["processed_tables_data", "1", "inv_ref", 0],
-                                "target_sheets": ["Invoice", "Contract", "Packing list"], # Apply ONLY to current sheet
-                                "case_sensitive": True
-                            },
-                            # Add more rules as needed
-                        ]
-                        # Call the utility function
-                        # Add the :::::::::::::::::::: debug print here
-                        proc_tables_rep = invoice_data.get('processed_tables_data', {})
-                        table_1_data_rep = proc_tables_rep.get('1', {})
-
-                        text_replace_utils.process_data_driven_replacements(
-                            workbook,
-                            invoice_data,
-                            data_driven_replacement_rules
-                        )
-                        # --- End Data-Driven Replacements for single-table ---
-
-                        # --- START FOB-Specific Hardcoded Replacements ---
-                        if args.fob:
-                            # Apply to ALL sheets when --fob is active (but only runs when processing that specific sheet)
-                            print(f":::::::::::::::::::: Performing FOB-specific hardcoded replacements for sheet '{sheet_name}'...")
-                            fob_specific_replacement_rules = [
-                                {
-                                    "find": "DAP",          # Text to find
-                                    "replace": "FOB",       # Text to replace with
-                                    "case_sensitive": False # Match regardless of case
-                                },
-                                {
-                                    "find": "FCA",          # Text to find
-                                    "replace": "FOB",       # Text to replace with
-                                    "case_sensitive": False # Match regardless of case
-                                },
-                                {
-                                    "find": "BINH PHUOC",    # Text to find
-                                    "replace": "BAVET",     # Text to replace with
-                                    "case_sensitive": False, # Match regardless of case
-                                    "exact_cell_match": True
-                                },
-                                {
-                                    "find": "BAVET, SVAY RIENG",    # Text to find
-                                    "replace": "BAVET",     # Text to replace with
-                                    "case_sensitive": True, # Match regardless of case
-                                    "exact_cell_match": True
-                                }
-                                # Add more FOB-specific rules here if needed
-                            ]
-                            # Call the function designed for find/replace rules
-                            # The function will apply the rules only to the sheet specified in target_sheets
-                            text_replace_utils.find_and_replace_in_workbook(
-                                workbook=workbook,
-                                replacement_rules=fob_specific_replacement_rules,
-                                target_sheets=[sheet_name] # Apply only to the current sheet being processed
-                            )
-                            print(f":::::::::::::::::::: Finished FOB-specific hardcoded replacements for sheet '{sheet_name}'.")
-                        # --- END FOB-Specific Hardcoded Replacements ---
-
-                    else: print(f"Failed to fill table data/footer for sheet '{sheet_name}'."); processing_successful = False
-                else:
-                    print(f"Error: Cannot fill data for '{sheet_name}' because header_info or column_map is missing/invalid.")
-                    processing_successful = False; continue # Skip filling if header info is bad
-
         # --- Restore Original Merges AFTER processing all sheets using merge_utils ---
         merge_utils.find_and_restore_merges_heuristic(workbook, original_merges, sheets_to_process)
 

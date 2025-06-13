@@ -57,7 +57,14 @@
     "col_cbm",
     "col_amount"
   ],
-
+  "number_formats": {
+    "col_qty_pcs": { "number_format": "#,##0" },
+    "col_qty_sf": { "number_format": "#,##0.00" },
+    "col_gross": { "number_format": "#,##0.00" },
+    "col_net": { "number_format": "#,##0.00" },
+    "col_cbm": { "number_format": "0.00" },
+    "col_amount": { "number_format": "#,##0.00" }
+  },
   "style": {
     "font":      { "name": "Times New Roman", "size": 12, "bold": true },
     "alignment": { "horizontal": "center", "vertical": "center" },
