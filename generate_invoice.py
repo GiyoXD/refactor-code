@@ -747,7 +747,7 @@ def main():
                 # ***** END INITIALIZE *****
  
                 # ***** REMOVED REDUNDANT PRE-CALCULATION LOOP - NOW DONE GLOBALLY *****
-                last_table = table_keys[-1]
+                last_table = len(table_keys)-1
  
                 # --- V11: Main loop now only writes data, doesn't insert --- # TODO urgent
                 for i, table_key in enumerate(table_keys):
@@ -856,6 +856,16 @@ def main():
                             )
 
                             if footer_row_index != -1:
+                                if sheet_styling_config:
+                                    row_heights_cfg = sheet_styling_config.get("row_heights", {})
+                                    footer_height = row_heights_cfg.get("footer", row_heights_cfg.get("header")) # Fallback to header height
+                                    if footer_height:
+                                        try:
+                                            worksheet.row_dimensions[grand_total_row_num].height = float(footer_height)
+                                            print(f"Set grand total row height at {grand_total_row_num} to {footer_height}.")
+                                        except (ValueError, TypeError):
+                                            print(f"Warning: Invalid footer height value '{footer_height}' in config.")
+                                # --- END: ADD THIS BLOCK ---
                                 write_pointer_row += 1 # Advance pointer after the new row
                                 print(f"--- Finished Adding Grand Total Row. Next write pointer: {write_pointer_row} ---")
                             else:
