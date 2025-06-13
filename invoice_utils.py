@@ -7,6 +7,7 @@ from openpyxl.styles import Alignment, Border, Side, Font, PatternFill, NamedSty
 from openpyxl.utils import column_index_from_string, get_column_letter
 from typing import List, Dict, Any, Optional, Tuple, Union
 from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 # --- Constants for Styling ---
 thin_side = Side(border_style="thin", color="000000")
@@ -284,6 +285,126 @@ def _apply_cell_style(cell, column_id: Optional[str], sheet_styling_config: Opti
     except Exception as style_err:
         print(f"Error applying cell style for ID {column_id}: {style_err}")
 
+
+
+def write_grand_total_weight_summary(
+    worksheet: Worksheet,
+    start_row: int,
+    header_info: Dict[str, Any],
+    processed_tables_data: Dict[str, Dict[str, List[Any]]],
+    weight_config: Dict[str, Any],
+    styling_config: Optional[Dict[str, Any]] = None
+) -> int:
+    """
+    Calculates GRAND TOTAL of Net/Gross weights, inserts two new rows,
+    and writes a styled two-row summary using the main footer's style.
+
+    Args:
+        worksheet: The openpyxl worksheet to modify.
+        start_row: The row index to start writing from.
+        header_info: The header dictionary containing 'column_id_map' and 'num_columns'.
+        processed_tables_data: The dictionary containing all table data.
+        weight_config: The configuration object for the weight summary.
+        footer_config: The main footer configuration for the sheet, used for styling.
+    """
+    footer_row_height = styling_config.get("styling", {}).get("row_heights", {}).get("footer", None)
+    footer_config = styling_config.get("footer_configurations", {})
+
+    if not weight_config.get("enabled"):
+        return start_row
+
+    print(f"--- Calculating and writing GRAND TOTAL Net/Gross Weight summary ---")
+
+    # --- Calculation Logic (no changes here) ---
+    grand_total_net = Decimal('0')
+    grand_total_gross = Decimal('0')
+
+    for table_data in processed_tables_data.values():
+        net_weights = table_data.get("net", [])
+        gross_weights = table_data.get("gross", [])
+        for weight in net_weights:
+            try:
+                grand_total_net += Decimal(str(weight))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+        for weight in gross_weights:
+            try:
+                grand_total_gross += Decimal(str(weight))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+
+    # --- Get Column Indices and Dimensions (no changes here) ---
+    col_id_map = header_info.get("column_id_map", {})
+    num_columns = header_info.get("num_columns", 1)
+    label_col_idx = col_id_map.get(weight_config.get("label_col_id"))
+    value_col_idx = col_id_map.get(weight_config.get("value_col_id"))
+
+    if not all([label_col_idx, value_col_idx]):
+        print("Warning: Could not write grand total weight summary. Label/Value column ID not found.")
+        return start_row
+
+    # --- MODIFICATION: Parse Styling from the main footer_config ---
+    # It now uses the new 'footer_config' parameter
+    style_config = footer_config.get('style', {})
+    font_to_apply = Font(**style_config.get('font', {'bold': True}))
+    align_to_apply = Alignment(**style_config.get('alignment', {'horizontal': 'right', 'vertical': 'center'}))
+
+    # --- Insert and unmerge rows (no changes here) ---
+    try:
+        worksheet.insert_rows(start_row, amount=2)
+        unmerge_row(worksheet, start_row, num_columns)
+        unmerge_row(worksheet, start_row + 1, num_columns)
+    except Exception as insert_err:
+        print(f"Error inserting/unmerging rows for weight summary: {insert_err}")
+        return start_row
+
+    # --- Write the final rows and apply styles (no changes here) ---
+    net_weight_row = start_row
+    gross_weight_row = start_row + 1
+
+    try:
+        cell_net_label = worksheet.cell(row=net_weight_row, column=label_col_idx, value="NET WEIGHT:")
+        cell_net_value = worksheet.cell(row=net_weight_row, column=value_col_idx, value=float(grand_total_net))
+        cell_net_value.number_format = FORMAT_NUMBER_COMMA_SEPARATED2
+
+        cell_gross_label = worksheet.cell(row=gross_weight_row, column=label_col_idx, value="GROSS WEIGHT:")
+        cell_gross_value = worksheet.cell(row=gross_weight_row, column=value_col_idx, value=float(grand_total_gross))
+        cell_gross_value.number_format = FORMAT_NUMBER_COMMA_SEPARATED2
+
+        for cell in [cell_net_label, cell_net_value, cell_gross_label, cell_gross_value]:
+            cell.font = font_to_apply
+            cell.alignment = align_to_apply
+        
+            # --- Get Column Indices and Dimensions (no changes here) ---
+        col_id_map = header_info.get("column_id_map", {})
+        num_columns = header_info.get("num_columns", 1)
+        label_col_idx = col_id_map.get(weight_config.get("label_col_id"))
+        value_col_idx = col_id_map.get(weight_config.get("value_col_id"))
+        
+        # ADD THIS LINE
+        last_mapped_col_idx = max(col_id_map.values()) if col_id_map else 1
+        for cell in [cell_net_label, cell_net_value, cell_gross_label, cell_gross_value]:
+            cell.font = font_to_apply
+            cell.alignment = align_to_apply
+
+        # --- ADD THIS BLOCK TO APPLY BORDERS ---
+        border_to_apply = thin_border
+        for row_idx in [net_weight_row, gross_weight_row]:
+            for col_idx in range(1, last_mapped_col_idx + 1):
+                worksheet.cell(row=row_idx, column=col_idx).border = border_to_apply
+        # --- END OF BLOCK ---
+
+        if footer_row_height:
+            worksheet.row_dimensions[net_weight_row].height = footer_row_height
+            worksheet.row_dimensions[gross_weight_row].height = footer_row_height
+        
+
+        print("--- Finished writing grand total weight summary. ---")
+        return start_row + 2
+
+    except Exception as e:
+        print(f"Error writing grand total weight summary content: {e}")
+        return start_row
 
 def write_header(worksheet: Worksheet, start_row: int, header_layout_config: List[Dict[str, Any]],
                  sheet_styling_config: Optional[Dict[str, Any]] = None

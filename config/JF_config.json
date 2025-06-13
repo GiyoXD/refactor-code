@@ -42,6 +42,11 @@
       "data_cell_merging_rule": {
         "col_item": {"rowspan": 1}
       },
+      "weight_summary_config": {
+        "enabled": true,
+        "label_col_id": "col_po",
+        "value_col_id": "col_item"
+      },
       "footer_configurations": {
   "comment": "This is the TEMPLATE for the main total row and the Grand Total row.",
 

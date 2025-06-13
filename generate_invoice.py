@@ -418,7 +418,9 @@ def process_single_table_sheet(
     data_source_indicator: str,
     invoice_data: Dict[str, Any],
     args: argparse.Namespace,
-    final_grand_total_pallets: int
+    final_grand_total_pallets: int,
+    processed_table_source: Dict[str, Dict[str, List[Any]]],
+    footer_config=None,
 ) -> bool:
     """
     Processes a sheet configured as a single table or aggregation.
@@ -513,14 +515,29 @@ def process_single_table_sheet(
         footer_info=footer_info, max_rows_to_fill=None,
         grand_total_pallets=final_grand_total_pallets,
         custom_flag=args.custom,
-        data_cell_merging_rules=data_cell_merging_rules
+        data_cell_merging_rules=data_cell_merging_rules,
     )
 
     if not fill_success:
         print(f"Failed to fill table data/footer for sheet '{sheet_name}'.")
         return False
     print(f"Successfully filled table data/footer for sheet '{sheet_name}'.")
-
+    weight_summary_config = sheet_mapping_section.get("weight_summary_config", {})
+    if weight_summary_config.get("enabled"):
+        # Get the data source needed for the calculation
+        processed_tables_data = invoice_data.get('processed_tables_data', {})
+        
+        if processed_tables_data:
+            next_row_after_footer = invoice_utils.write_grand_total_weight_summary(
+                worksheet=worksheet,
+                start_row=next_row_after_footer,
+                header_info=header_info,
+                processed_tables_data=processed_tables_data,
+                weight_config=weight_summary_config,
+                styling_config=sheet_mapping_section
+            )
+        else:
+            print("Warning: Weight summary was enabled, but 'processed_tables_data' was not found in the source data.")
     # --- Post-fill processing ---
 
     # Apply column widths as defined in the styling configuration
@@ -698,6 +715,7 @@ def main():
             merge_rules_footer = sheet_mapping_section.get("merge_rules_footer", {})
             data_cell_merging_rules = sheet_mapping_section.get("data_cell_merging_rule", None)
             sheet_header_to_write = sheet_mapping_section.get("header_to_write", None)
+            footer_config = sheet_mapping_section.get("footer_configurations", None),
 
             print(f"DEBUG Check Flags Read for Sheet '{sheet_name}': after_hdr={add_blank_after_hdr_flag}, before_ftr={add_blank_before_ftr_flag}")
             if sheet_styling_config: print("DEBUG: Styling config found for this sheet.")
@@ -891,7 +909,8 @@ def main():
                         table_keys=table_keys,
                         footer_config=footer_config_for_summary, # <-- Pass the config here
                         mapping_rules=sheet_inner_mapping_rules_dict,
-                        styling_config=sheet_styling_config
+                        styling_config=sheet_styling_config,
+                        row_height_cfg_footer=row_height_cfg_footer
                     )
                 # --- End Summary Rows Logic ---
                 # --- START FOB-Specific Hardcoded Replacements (Multi-Table) ---
@@ -969,7 +988,9 @@ def main():
                     data_source_indicator=data_source_indicator,
                     invoice_data=invoice_data,
                     args=args,
-                    final_grand_total_pallets=final_grand_total_pallets
+                    final_grand_total_pallets=final_grand_total_pallets,
+                    processed_table_source=processed_tables_data_for_calc,
+                    footer_config=footer_config,
                 )
         # --- Restore Original Merges AFTER processing all sheets using merge_utils ---
         merge_utils.find_and_restore_merges_heuristic(workbook, original_merges, sheets_to_process)
