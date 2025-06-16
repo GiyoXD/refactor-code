@@ -914,7 +914,7 @@ def prepare_data_rows(
     idx_to_header_map: Dict[int, str],
     desc_col_idx: int,
     num_static_labels: int,
-    static_value_map: Dict[int, Any]
+    static_value_map: Dict[int, Any],
 ) -> Tuple[List[Dict[int, Any]], List[int], bool, int]:
     """
     Final Corrected Version: Removes the redundant parsing of custom_aggregation keys.
@@ -923,6 +923,7 @@ def prepare_data_rows(
     pallet_counts_for_rows = []
     dynamic_desc_used = False
     num_data_rows_from_source = 0
+    dynamic_desc_used = data_source.get("1", {}).get("description", False) or data_source.get("desc", False) or data_source.get("description", False)
     
     NUMERIC_IDS = {"col_qty_pcs", "col_qty_sf", "col_unit_price", "col_amount", "col_net", "col_gross", "col_cbm"}
 
@@ -968,9 +969,6 @@ def prepare_data_rows(
                 # Get the potential description value from the source tuple
                 desc_value = key_tuple[3]
                 row_dict[desc_col_idx] = desc_value
-                # Only set the flag if the value is meaningful (not None, not empty/whitespace)
-                if desc_value and str(desc_value).strip():
-                    dynamic_desc_used = True
             
             # Map data from the value dictionary
             row_dict[column_id_map.get("col_qty_sf")] = _to_numeric(value_dict.get("sqft_sum"))
@@ -1002,7 +1000,6 @@ def prepare_data_rows(
                     if target_id in NUMERIC_IDS: data_value = _to_numeric(data_value)
                     if data_value is not None:
                         row_dict[target_col_idx] = data_value
-                        if target_col_idx == desc_col_idx: dynamic_desc_used = True
                     elif "fallback_on_none" in mapping_rule:
                         row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
                 if amount_col_idx:
@@ -1029,8 +1026,7 @@ def prepare_data_rows(
                         is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
                         if not is_empty:
                             row_dict[target_col_idx] = data_value
-                            if target_col_idx == desc_col_idx: dynamic_desc_used = True
-                        elif "fallback_on_none" in mapping_rule:
+                        elif "fallback_on_none" in mapping_rule and dynamic_desc_used == False:
                             row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
                 data_rows_prepared.append(row_dict)
     
@@ -1044,22 +1040,24 @@ def prepare_data_rows(
     
      # --- Centralized Check for Dynamic Description ---
     # This single block runs after the data is prepared, regardless of source.
-    dynamic_desc_used = False
+    fallback_on_none = dynamic_mapping_rules.get("description", {}).get("fallback_on_none")
     desc_col_idx = column_id_map.get("col_desc")
+    po_col_idx = column_id_map.get("col_po")
     if desc_col_idx:
         for row_data in data_rows_prepared:
             desc_value = row_data.get(desc_col_idx)
             # If a meaningful description is found, set the flag and stop checking.
             if desc_value and str(desc_value).strip():
-                dynamic_desc_used = True
                 break
+            elif fallback_on_none and row_data.get(po_col_idx):
+                row_data[desc_col_idx] = fallback_on_none
 
     # --- Final Processing Steps ---
     if static_value_map:
         for row_data in data_rows_prepared:
             for col_idx, static_val in static_value_map.items():
                 if col_idx not in row_data: row_data[col_idx] = static_val
-        
+    
     return data_rows_prepared, pallet_counts_for_rows, dynamic_desc_used, num_data_rows_from_source
 
 
@@ -1571,6 +1569,7 @@ def fill_invoice_data(
         num_static_labels = parsed_rules["num_static_labels"]
         static_column_header_name = parsed_rules["static_column_header_name"]
         apply_special_border_rule = parsed_rules["apply_special_border_rule"]
+        fallback_on_none = parsed_rules.get("dynamic_mapping_rules", {}).get("description", {}).get("fallback_on_none")
 
         # --- Prepare Data Rows for Writing (Determine number of rows needed from source) ---
         # This section remains largely the same, preparing the `data_rows_prepared` list
@@ -1584,7 +1583,7 @@ def fill_invoice_data(
             idx_to_header_map=idx_to_header_map,
             desc_col_idx=desc_col_idx,
             num_static_labels=num_static_labels,
-            static_value_map=static_value_map
+            static_value_map=static_value_map,
         )
 # --- Determine Final Number of Data Rows ---
 # The number of rows to process is the greater of the number of data rows or static labels.

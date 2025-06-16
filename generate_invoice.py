@@ -585,7 +585,8 @@ def process_single_table_sheet(
             {"find": "DAP", "replace": "FOB", "case_sensitive": False},
             {"find": "FCA", "replace": "FOB", "case_sensitive": False},
             {"find": "BINH PHUOC", "replace": "BAVET", "case_sensitive": False, "exact_cell_match": True},
-            {"find": "BAVET, SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True}
+            {"find": "BAVET, SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True},
+            {"find": "BAVET,SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True}
         ]
         text_replace_utils.find_and_replace_in_workbook(
             workbook=workbook,
@@ -897,6 +898,7 @@ def main():
                 # --- V11: Logic for Summary Rows (BUFFALO summary + blank) ---
                 summary_flag = sheet_mapping_section.get("summary", False)
                 sheet_inner_mapping_rules_dict = sheet_mapping_section.get('mappings', {})
+
                 if summary_flag and processing_successful and last_table_header_info and args.fob:
                     # Get the footer config to pass its styles to the summary writer
                     footer_config_for_summary = sheet_mapping_section.get("footer_configurations", {})
@@ -910,7 +912,6 @@ def main():
                         footer_config=footer_config_for_summary, # <-- Pass the config here
                         mapping_rules=sheet_inner_mapping_rules_dict,
                         styling_config=sheet_styling_config,
-                        row_height_cfg_footer=row_height_cfg_footer
                     )
                 # --- End Summary Rows Logic ---
                 # --- START FOB-Specific Hardcoded Replacements (Multi-Table) ---
