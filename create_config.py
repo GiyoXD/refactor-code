@@ -275,7 +275,10 @@ class DictionaryEditor(tk.Toplevel):
             key_entry.grid(row=i + 1, column=0, padx=5, pady=2, sticky="ew")
 
             value_entry = tk.Entry(self.scrollable_frame)
-            value_str = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+            try:
+                value_str = json.dumps(value)
+            except TypeError:
+                value_str = str(value) 
             value_entry.insert(0, value_str)
             value_entry.grid(row=i + 1, column=1, padx=5, pady=2, sticky="ew")
 
@@ -319,6 +322,10 @@ class JsonConfigEditorApp:
         self.current_filepath = None
         self.selected_sheet_name = tk.StringVar()
         self.temp_dict_data = {}
+        
+        self.sheet_start_row = None
+        self.header_widgets = []
+        self.mapping_widgets = []
 
         self._setup_menu()
         self._setup_main_layout()
@@ -337,7 +344,6 @@ class JsonConfigEditorApp:
         self.menubar.add_cascade(label="File", menu=file_menu)
 
     def _setup_main_layout(self):
-        # --- Left Panel for Sheet Selection (fixed list) ---
         left_panel = tk.Frame(self.root, width=250, relief=tk.RIDGE, bd=2)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
         left_panel.pack_propagate(False)
@@ -347,7 +353,6 @@ class JsonConfigEditorApp:
         self.sheet_listbox.pack(expand=False, fill=tk.X, padx=5, pady=5)
         self.sheet_listbox.bind("<<ListboxSelect>>", self.on_sheet_select)
 
-        # --- Right Panel for Editing ---
         right_panel = tk.Frame(self.root)
         right_panel.pack(side=tk.RIGHT, expand=True, fill=tk.BOTH, padx=5, pady=5)
         self.notebook = ttk.Notebook(right_panel)
@@ -368,8 +373,14 @@ class JsonConfigEditorApp:
             with open(filepath, 'r', encoding='utf-8') as f: self.config_data = json.load(f)
             self.current_filepath = filepath
             self.root.title(f"Invoice Configuration Editor - {os.path.basename(filepath)}")
+            
+            # This will repopulate the sheet list on the left AND trigger on_sheet_select,
+            # which correctly populates the UI for the first sheet.
             self.update_sheet_listbox()
-            self.clear_notebook_tabs()
+            
+            ### FIX: This line was incorrectly erasing the UI after it was drawn. It has been removed.
+            # self.clear_notebook_tabs() 
+            
         except Exception as e:
             messagebox.showerror("Error Opening File", f"Failed to open or parse file:\n{e}")
 
@@ -387,14 +398,16 @@ class JsonConfigEditorApp:
     def _save_to_file(self, filepath):
         try:
             self.update_config_from_ui()
-            with open(filepath, 'w', encoding='utf-8') as f: json.dump(self.config_data, f, indent=2)
+            with open(filepath, 'w', encoding='utf-8') as f: json.dump(self.config_data, f, indent=4)
             messagebox.showinfo("Save Successful", f"Configuration saved to:\n{filepath}")
         except Exception as e: messagebox.showerror("Error Saving File", f"Failed to save file:\n{e}")
 
     def update_sheet_listbox(self):
         self.sheet_listbox.delete(0, tk.END)
+        # Make sure there is data to process
+        if not self.config_data: return
         for sheet_name in self.config_data.get("sheets_to_process", []):
-             self.sheet_listbox.insert(tk.END, sheet_name)
+            self.sheet_listbox.insert(tk.END, sheet_name)
         if self.sheet_listbox.size() > 0:
             self.sheet_listbox.selection_set(0)
             self.on_sheet_select(None)
@@ -402,7 +415,10 @@ class JsonConfigEditorApp:
     def on_sheet_select(self, event):
         selected_indices = self.sheet_listbox.curselection()
         if not selected_indices: return
-        if self.selected_sheet_name.get(): self.update_config_from_ui()
+        
+        if self.selected_sheet_name.get(): 
+            self.update_config_from_ui()
+            
         sheet_name = self.sheet_listbox.get(selected_indices[0])
         self.selected_sheet_name.set(sheet_name)
         self.populate_notebook_for_sheet(sheet_name)
@@ -480,12 +496,22 @@ class JsonConfigEditorApp:
         e_id = tk.Entry(parent, width=20); e_id.insert(0, item_data.get("id", "")); e_id.grid(row=row_num, column=3); widgets["id"] = e_id
         e_rs = tk.Entry(parent, width=8); e_rs.insert(0, item_data.get("rowspan", "1")); e_rs.grid(row=row_num, column=4); widgets["rowspan"] = e_rs
         e_cs = tk.Entry(parent, width=8); e_cs.insert(0, item_data.get("colspan", "1")); e_cs.grid(row=row_num, column=5); widgets["colspan"] = e_cs
-        tk.Button(parent, text="X", fg="red", command=lambda w=widgets: self.remove_row_ui(w, self.header_widgets)).grid(row=row_num, column=6)
+        remove_button = tk.Button(parent, text="X", fg="red", command=lambda w=widgets: self.remove_row_ui(w, self.header_widgets))
+        remove_button.grid(row=row_num, column=6)
+        widgets["remove_btn"] = remove_button
         self.header_widgets.append(widgets)
 
     def remove_row_ui(self, row_to_remove, widget_list):
-        for widget in row_to_remove.values(): widget.destroy()
-        widget_list[:] = [row for row in widget_list if row != row_to_remove]
+        container = row_to_remove.get("_row_frame")
+        if isinstance(container, tk.Widget):
+            container.destroy()
+        else:
+            for item in row_to_remove.values():
+                if isinstance(item, tk.Widget):
+                    item.destroy()
+        
+        if row_to_remove in widget_list:
+            widget_list.remove(row_to_remove)
         
     def create_mappings_tab(self, sheet_conf):
         tab = ttk.Frame(self.notebook, padding=10)
@@ -503,19 +529,26 @@ class JsonConfigEditorApp:
         for i, h in enumerate(headers): tk.Label(self.mappings_scrollable_frame, text=h, font=("Helvetica", 10, "bold")).grid(row=0, column=i, padx=5)
         mappings = sheet_conf.get("mappings", {})
         for i, (name, rule) in enumerate(mappings.items()): self.add_mapping_row_ui(i + 1, name, rule)
-        tk.Button(self.mappings_scrollable_frame, text="+ Add Mapping Rule", command=self.add_new_mapping_rule).grid(row=len(mappings) + 2, column=0, columnspan=len(headers), pady=10)
+        tk.Button(self.mappings_scrollable_frame, text="+ Add Mapping Rule", command=self.add_new_mapping_rule).grid(row=len(self.mapping_widgets) + 2, column=0, columnspan=len(headers), pady=10)
 
     def add_mapping_row_ui(self, row_num, name, rule):
         parent = self.mappings_scrollable_frame
-        widgets = {"_row_frame": tk.Frame(parent), "_rule_data": rule}
-        widgets["_row_frame"].grid(row=row_num, column=0, columnspan=6, sticky='ew')
-        name_entry = tk.Entry(widgets["_row_frame"], width=15); name_entry.insert(0, name); name_entry.grid(row=0, column=0, padx=2); widgets["name"] = name_entry
-        id_entry = tk.Entry(widgets["_row_frame"], width=15); id_entry.insert(0, rule.get("id", "")); id_entry.grid(row=0, column=1, padx=2); widgets["id"] = id_entry
+        row_frame = tk.Frame(parent)
+        row_frame.grid(row=row_num, column=0, columnspan=6, sticky='ew', pady=2)
+        widgets = {"_row_frame": row_frame, "_rule_data": rule}
+        
+        name_entry = tk.Entry(row_frame, width=15); name_entry.insert(0, name); name_entry.pack(side="left", padx=2); widgets["name"] = name_entry
+        id_entry = tk.Entry(row_frame, width=15); id_entry.insert(0, rule.get("id", "")); id_entry.pack(side="left", padx=2); widgets["id"] = id_entry
+        
         rule_type = self._determine_rule_type(rule)
-        type_combo = ttk.Combobox(widgets["_row_frame"], values=["From Data Key", "From Data Value", "Formula", "Static Rows", "Data Map"], width=15); type_combo.set(rule_type); type_combo.grid(row=0, column=2, padx=2); widgets["type_combo"] = type_combo
-        details_frame = tk.Frame(widgets["_row_frame"]); details_frame.grid(row=0, column=3, padx=2, sticky="w"); widgets["_details_frame"] = details_frame
-        fallback_entry = tk.Entry(widgets["_row_frame"], width=15); fallback_entry.insert(0, rule.get("fallback_on_none", "")); fallback_entry.grid(row=0, column=4, padx=2); widgets["fallback"] = fallback_entry
-        tk.Button(widgets["_row_frame"], text="X", fg="red", command=lambda w=widgets: self.remove_row_ui(w, self.mapping_widgets)).grid(row=0, column=5, padx=5)
+        type_combo = ttk.Combobox(row_frame, values=["From Data Key", "From Data Value", "Formula", "Static Rows", "Data Map"], width=15, state="readonly"); type_combo.set(rule_type); type_combo.pack(side="left", padx=2); widgets["type_combo"] = type_combo
+        
+        details_frame = tk.Frame(row_frame); details_frame.pack(side="left", padx=2, fill="x", expand=True); widgets["_details_frame"] = details_frame
+        fallback_entry = tk.Entry(row_frame, width=15); fallback_entry.insert(0, rule.get("fallback_on_none", "")); fallback_entry.pack(side="left", padx=2); widgets["fallback"] = fallback_entry
+        
+        remove_button = tk.Button(row_frame, text="X", fg="red", command=lambda w=widgets: self.remove_row_ui(w, self.mapping_widgets))
+        remove_button.pack(side="left", padx=5)
+        
         type_combo.bind("<<ComboboxSelected>>", lambda event, w=widgets: self._update_mapping_rule_details_ui(w))
         self.mapping_widgets.append(widgets)
         self._update_mapping_rule_details_ui(widgets)
@@ -531,6 +564,11 @@ class JsonConfigEditorApp:
     def _update_mapping_rule_details_ui(self, widget_dict):
         details_frame = widget_dict["_details_frame"]
         for child in details_frame.winfo_children(): child.destroy()
+        
+        keys_to_clear = ["key_index", "value_key", "formula_template", "inputs"]
+        for key in keys_to_clear:
+            widget_dict.pop(key, None)
+
         rule_type = widget_dict["type_combo"].get()
         rule = widget_dict.get("_rule_data", {})
         
@@ -547,7 +585,7 @@ class JsonConfigEditorApp:
             inputs_entry = tk.Entry(details_frame, width=25); inputs_entry.insert(0, ", ".join(rule.get("inputs", []))); inputs_entry.pack(side="left"); widget_dict["inputs"] = inputs_entry
             ToolTip(inputs_entry, "Comma-separated list of column IDs")
         elif rule_type in ["Static Rows", "Data Map"]:
-             tk.Label(details_frame, text="Defined in Mappings").pack(side="left")
+            tk.Label(details_frame, text="Defined in Mappings").pack(side="left")
 
     def add_new_mapping_rule(self):
         new_row_num = len(self.mapping_widgets) + 1
@@ -601,63 +639,87 @@ class JsonConfigEditorApp:
 
     def update_config_from_ui(self):
         sheet_name = self.selected_sheet_name.get()
-        if not sheet_name: return
+        if not sheet_name or sheet_name not in self.config_data.get("data_mapping", {}): 
+            return
         
-        sheet_conf = self.config_data["data_mapping"].get(sheet_name, {})
+        sheet_conf = self.config_data["data_mapping"][sheet_name]
         
-        try: sheet_conf["start_row"] = int(self.sheet_start_row.get())
-        except (ValueError, AttributeError): sheet_conf["start_row"] = 21
-        self.config_data["sheet_data_map"][sheet_name] = self.sheet_data_source.get()
-        sheet_conf["summary"] = self.sheet_summary_var.get()
-        sheet_conf["add_blank_before_footer"] = self.sheet_bbf_var.get()
+        if self.sheet_start_row:
+            try: sheet_conf["start_row"] = int(self.sheet_start_row.get())
+            except (ValueError, AttributeError): sheet_conf["start_row"] = 21
+            self.config_data["sheet_data_map"][sheet_name] = self.sheet_data_source.get()
+            sheet_conf["summary"] = self.sheet_summary_var.get()
+            sheet_conf["add_blank_before_footer"] = self.sheet_bbf_var.get()
         
         header_data = []
-        for row in self.header_widgets:
-            if row and row['text'].winfo_exists():
+        for row_widgets in self.header_widgets:
+            if row_widgets and row_widgets['text'].winfo_exists():
                 try:
-                    header_data.append({"row": int(row['row'].get()), "col": int(row['col'].get()), "text": row['text'].get(), "id": row['id'].get(), "rowspan": int(row['rowspan'].get()), "colspan": int(row['colspan'].get())})
-                except (ValueError, tk.TclError): print("Skipping invalid header row data.")
+                    header_data.append({
+                        "row": int(row_widgets['row'].get()), 
+                        "col": int(row_widgets['col'].get()), 
+                        "text": row_widgets['text'].get(), 
+                        "id": row_widgets['id'].get(), 
+                        "rowspan": int(row_widgets['rowspan'].get()), 
+                        "colspan": int(row_widgets['colspan'].get())
+                    })
+                except (ValueError, tk.TclError): 
+                    print(f"Skipping invalid or incomplete header row data for sheet '{sheet_name}'.")
         sheet_conf['header_to_write'] = header_data
 
         mappings_data = {}
         for widgets in self.mapping_widgets:
             if not widgets["name"].winfo_exists(): continue
-            name = widgets["name"].get().strip(); rule_type = widgets["type_combo"].get()
+            name = widgets["name"].get().strip()
             if not name: continue
+            
             rule = {"id": widgets["id"].get()}
             if widgets["fallback"].get().strip(): rule["fallback_on_none"] = widgets["fallback"].get().strip()
+
+            rule_type = widgets["type_combo"].get()
             if rule_type == "From Data Key":
-                try: rule["key_index"] = int(widgets["key_index"].get())
-                except (ValueError, KeyError): pass
-            elif rule_type == "From Data Value": rule["value_key"] = widgets["value_key"].get()
+                key_index_widget = widgets.get("key_index")
+                if key_index_widget:
+                    try: rule["key_index"] = int(key_index_widget.get())
+                    except (ValueError, tk.TclError): pass
+            elif rule_type == "From Data Value":
+                value_key_widget = widgets.get("value_key")
+                if value_key_widget: rule["value_key"] = value_key_widget.get()
             elif rule_type == "Formula":
                 rule["type"] = "formula"
-                rule["formula_template"] = widgets["formula_template"].get()
-                rule["inputs"] = [i.strip() for i in widgets["inputs"].get().split(',') if i.strip()]
+                rule["formula_template"] = widgets.get("formula_template", tk.Entry()).get()
+                inputs_str = widgets.get("inputs", tk.Entry()).get()
+                rule["inputs"] = [i.strip() for i in inputs_str.split(',') if i.strip()]
+            
             mappings_data[name] = rule
         sheet_conf['mappings'] = mappings_data
 
         styling_conf = sheet_conf.get("styling", {})
-        styling_conf["force_text_format_ids"] = [i.strip() for i in self.style_force_text.get().split(',') if i.strip()]
-        styling_conf["column_ids_with_full_grid"] = [i.strip() for i in self.style_full_grid.get().split(',') if i.strip()]
+        if hasattr(self, 'style_force_text'):
+            styling_conf["force_text_format_ids"] = [i.strip() for i in self.style_force_text.get().split(',') if i.strip()]
+            styling_conf["column_ids_with_full_grid"] = [i.strip() for i in self.style_full_grid.get().split(',') if i.strip()]
         for key in ['column_id_styles', 'column_id_widths', 'row_heights']:
             if key in self.temp_dict_data: styling_conf[key] = self.temp_dict_data[key]
         sheet_conf["styling"] = styling_conf
 
         footer_conf = sheet_conf.get("footer_configurations", {})
-        footer_conf["total_text"] = self.footer_total_text.get()
-        footer_conf["total_text_column_id"] = self.footer_total_text_id.get()
-        footer_conf["pallet_count_column_id"] = self.footer_pallet_id.get()
-        footer_conf["sum_column_ids"] = [i.strip() for i in self.footer_sum_ids.get().split(',') if i.strip()]
+        if hasattr(self, 'footer_total_text'):
+            footer_conf["total_text"] = self.footer_total_text.get()
+            footer_conf["total_text_column_id"] = self.footer_total_text_id.get()
+            footer_conf["pallet_count_column_id"] = self.footer_pallet_id.get()
+            footer_conf["sum_column_ids"] = [i.strip() for i in self.footer_sum_ids.get().split(',') if i.strip()]
         if 'number_formats' in self.temp_dict_data: footer_conf["number_formats"] = self.temp_dict_data['number_formats']
         sheet_conf["footer_configurations"] = footer_conf
         
         weight_conf = sheet_conf.get("weight_summary_config", {})
-        weight_conf["enabled"] = self.adv_weight_enabled.get(); weight_conf["label_col_id"] = self.adv_weight_label.get(); weight_conf["value_col_id"] = self.adv_weight_value.get()
+        if hasattr(self, 'adv_weight_enabled'):
+            weight_conf["enabled"] = self.adv_weight_enabled.get()
+            weight_conf["label_col_id"] = self.adv_weight_label.get()
+            weight_conf["value_col_id"] = self.adv_weight_value.get()
         sheet_conf["weight_summary_config"] = weight_conf
-        if 'static_content_before_footer' in self.temp_dict_data: sheet_conf["static_content_before_footer"] = self.temp_dict_data['static_content_before_footer']
-        if 'data_cell_merging_rule' in self.temp_dict_data: sheet_conf["data_cell_merging_rule"] = self.temp_dict_data['data_cell_merging_rule']
-        if 'merge_rules_before_footer' in self.temp_dict_data: sheet_conf["merge_rules_before_footer"] = self.temp_dict_data['merge_rules_before_footer']
+        
+        for key in ['static_content_before_footer', 'data_cell_merging_rule', 'merge_rules_before_footer']:
+            if key in self.temp_dict_data: sheet_conf[key] = self.temp_dict_data[key]
 
         self.config_data["data_mapping"][sheet_name] = sheet_conf
 

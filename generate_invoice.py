@@ -567,38 +567,8 @@ def process_single_table_sheet(
                 if target_cell and summary_value is not None:
                     target_cell.value = summary_value
 
-    # Perform data-driven replacements (e.g., JFINV, JFTIME)
-    print("Performing data-driven replacements for single-table sheet...")
-    data_driven_replacement_rules = [
-        {"find": "JFINV", "data_path": ["processed_tables_data", "1", "inv_no", 0], "target_sheets": [sheet_name]},
-        {"find": "JFTIME", "data_path": ["processed_tables_data", "1", "inv_date", 0], "target_sheets": [sheet_name], "is_date": True},
-        {"find": "JFREF", "data_path": ["processed_tables_data", "1", "inv_ref", 0], "target_sheets": [sheet_name]}
-    ]
-    text_replace_utils.process_data_driven_replacements(
-        workbook, invoice_data, data_driven_replacement_rules
-    )
-
-    # Perform hardcoded text replacements if the --fob flag is active
-    if args.fob:
-        print(f":::::::::::::::::::: Performing FOB-specific hardcoded replacements for sheet '{sheet_name}'...")
-        fob_specific_replacement_rules = [
-            {"find": "DAP", "replace": "FOB", "case_sensitive": False},
-            {"find": "FCA", "replace": "FOB", "case_sensitive": False},
-            {"find": "BINH PHUOC", "replace": "BAVET", "case_sensitive": False, "exact_cell_match": True},
-            {"find": "BAVET, SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True},
-            {"find": "BAVET,SVAY RIENG", "replace": "BAVET", "case_sensitive": True, "exact_cell_match": True}
-        ]
-        text_replace_utils.find_and_replace_in_workbook(
-            workbook=workbook,
-            replacement_rules=fob_specific_replacement_rules,
-            target_sheets=[sheet_name]
-        )
-        print(f":::::::::::::::::::: Finished FOB-specific hardcoded replacements for sheet '{sheet_name}'.")
-
     return True
 
-
-# --- Main Orchestration Logic ---
 def main():
     """Main function to orchestrate invoice generation."""
     parser = argparse.ArgumentParser(description="Generate Invoice from Template and Data using configuration files.")
@@ -648,8 +618,21 @@ def main():
             sys.exit(1) # Exit if no sheets to process
 
         # --- Store Original Merges BEFORE processing using merge_utils ---
-        original_merges = merge_utils.store_original_merges(workbook, sheets_to_process)
-        print("DEBUG: Stored original merges structure:")
+        if args.fob:
+            print("\n--- Running initial template replacements for FOB ---")
+            text_replace_utils.run_fob_specific_replacement_task(
+                workbook=workbook
+            )
+        
+        # Perform data-driven replacements (e.g., JFINV, JFTIME)
+        print("Performing data-driven replacements for single-table sheet...")
+        text_replace_utils.run_invoice_header_replacement_task(
+            workbook, invoice_data
+        )
+        print("--- Finished initial template replacements ---\n")
+
+        original_merges = merge_utils.store_original_merges(workbook, sheets_to_process) # TODO: Re-enable
+        # print("DEBUG: Stored original merges structure:")
 
         # --- Get other config sections ---
         sheet_data_map = config.get('sheet_data_map', {})
@@ -840,7 +823,12 @@ def main():
                                     invoice_utils.unmerge_row(worksheet, spacer_row, num_cols_spacer) # Ensure clear
                                     worksheet.merge_cells(start_row=spacer_row, start_column=1, end_row=spacer_row, end_column=num_cols_spacer)
                                     # Optionally add styling or blank value to the merged cell
-                                    # worksheet.cell(row=spacer_row, column=1).border = ... 
+                                    if sheet_styling_config:
+                                        row_heights_cfg = sheet_styling_config.get("row_heights", {})
+                                        # Assume you have a 'spacer' height defined in your config
+                                        spacer_height = row_heights_cfg.get("header") 
+                                        if spacer_height:
+                                            worksheet.row_dimensions[spacer_row].height = float(spacer_height)
                                     write_pointer_row += 1 # Advance pointer past the spacer row
                                 except Exception as merge_err: 
                                     print(f"Warning: Failed to write/merge spacer row {spacer_row}: {merge_err}"); 
@@ -855,7 +843,7 @@ def main():
                 # --- End Table Loop ---
  
                 # ***** ADD GRAND TOTAL ROW (for multi-table summary) *****
-                    if processing_successful and num_tables > 1 and last_table==i:
+                    if num_tables > 1 and last_table==i:
                         grand_total_row_num = write_pointer_row
                         print(f"\n--- Adding Grand Total Row at index {grand_total_row_num} using write_footer_row ---")
                         try:
@@ -871,7 +859,8 @@ def main():
                                 footer_config=footer_config_for_gt,
                                 pallet_count=grand_total_pallets_for_summary_row,
                                 override_total_text="TOTAL OF:",
-                                grand_total_flag=True
+                                grand_total_flag=True,
+                                fob_mode=args.fob
                             )
 
                             if footer_row_index != -1:
@@ -914,45 +903,6 @@ def main():
                         styling_config=sheet_styling_config,
                     )
                 # --- End Summary Rows Logic ---
-                # --- START FOB-Specific Hardcoded Replacements (Multi-Table) ---
-                if args.fob:
-                    # Apply to the current multi-table sheet if --fob is active
-                    print(f":::::::::::::::::::: Performing FOB-specific hardcoded replacements for multi-table sheet '{sheet_name}'...")
-                    fob_specific_replacement_rules = [
-                        {
-                            "find": "DAP",          # Text to find
-                            "replace": "FOB",       # Text to replace with
-                            "case_sensitive": False # Match regardless of case
-                        },
-                        {
-                            "find": "FCA",          # Text to find
-                            "replace": "FOB",       # Text to replace with
-                            "case_sensitive": False # Match regardless of case
-                        },
-                        {
-                            "find": "BAVET, SVAY RIENG",    # Text to find
-                            "replace": "BAVET",     # Text to replace with
-                            "case_sensitive": True, # Match regardless of case
-                            "exact_cell_match": True
-                        },
-                        {
-                            "find": "BINH PHUOC",    # Text to find
-                            "replace": "BAVET",     # Text to replace with
-                            "case_sensitive": True, # Match regardless of case
-                            "exact_cell_match": True
-                        }
-                        # Add more FOB-specific rules here if needed
-                    ]
-                    # Call the function designed for find/replace rules
-                    # Apply ONLY to the current sheet being processed
-                    text_replace_utils.find_and_replace_in_workbook(
-                        workbook=workbook,
-                        replacement_rules=fob_specific_replacement_rules,
-                        target_sheets=[sheet_name] # Apply only to the current sheet
-                    )
-                    print(f":::::::::::::::::::: Finished FOB-specific hardcoded replacements for multi-table sheet '{sheet_name}'.")
-                # --- END FOB-Specific Hardcoded Replacements (Multi-Table) ---
-
                 # --- Apply Column Widths AFTER loop using the last header info ---
                 if processing_successful and last_table_header_info:
                     print(f"Applying column widths for multi-table sheet '{sheet_name}'...")
@@ -994,7 +944,7 @@ def main():
                     footer_config=footer_config,
                 )
         # --- Restore Original Merges AFTER processing all sheets using merge_utils ---
-        merge_utils.find_and_restore_merges_heuristic(workbook, original_merges, sheets_to_process)
+        merge_utils.find_and_restore_merges_heuristic(workbook, original_merges, sheets_to_process) # TODO: Re-enable
 
         # 5. Save the final workbook
         print("\n--------------------------------")

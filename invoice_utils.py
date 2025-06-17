@@ -246,7 +246,7 @@ def apply_row_merges(worksheet: Worksheet, row_num: int, num_cols: int, merge_ru
             # Log or handle other merge errors
             pass
 
-def _apply_cell_style(cell, column_id: Optional[str], sheet_styling_config: Optional[Dict[str, Any]]):
+def _apply_cell_style(cell, column_id: Optional[str], sheet_styling_config: Optional[Dict[str, Any]] = None, fob_mode: Optional[bool] = False):
     """
     Applies font, alignment, and number format to a cell based on a column ID.
     """
@@ -276,8 +276,10 @@ def _apply_cell_style(cell, column_id: Optional[str], sheet_styling_config: Opti
             
         # --- Apply Number Format ---
         number_format = col_specific_style.get("number_format")
-        if number_format and cell.number_format != FORMAT_TEXT:
+        if number_format and cell.number_format != FORMAT_TEXT and not fob_mode:
             cell.number_format = number_format
+        elif number_format and cell.number_format != FORMAT_TEXT and fob_mode:
+            cell.number_format = FORMAT_NUMBER_COMMA_SEPARATED2
         elif cell.number_format != FORMAT_TEXT and (cell.number_format == FORMAT_GENERAL or cell.number_format is None):
             if isinstance(cell.value, float): cell.number_format = FORMAT_NUMBER_COMMA_SEPARATED2
             elif isinstance(cell.value, int): cell.number_format = FORMAT_NUMBER_COMMA_SEPARATED1
@@ -877,7 +879,7 @@ def apply_explicit_data_cell_merges_by_id(
             anchor_cell = worksheet.cell(row=row_num, column=start_col_idx)
             
             # Apply base styling for the column ID
-            _apply_cell_style(anchor_cell, col_id, sheet_styling_config)
+            _apply_cell_style(anchor_cell, col_id, sheet_styling_config, fob_mode)
             
             # Ensure the merged cell has the desired border and alignment
             anchor_cell.border = full_thin_border
@@ -1083,7 +1085,7 @@ def _style_row_before_footer(
         current_id = idx_to_id_map.get(c_idx)
 
         # Apply general cell styling (font, alignment, number format) first
-        _apply_cell_style(cell, current_id, sheet_styling_config)
+        _apply_cell_style(cell, current_id, sheet_styling_config, fob_mode)
 
         # Now, apply the specific border logic for this row
         if c_idx == col1_index:
@@ -1281,7 +1283,7 @@ def write_summary_rows(
                 current_col_id = idx_to_id_map.get(c_idx)
 
                 # Step 1: Apply column-specific styles first (like number formats).
-                _apply_cell_style(cell, current_col_id, styling_config)
+                _apply_cell_style(cell, current_col_id, styling_config, fob_mode)
 
                 # Step 2: Enforce the general footer style as the final rule.
                 cell.font = font_to_apply
@@ -1741,7 +1743,7 @@ def fill_invoice_data(
                     if current_id in force_text_format_ids:
                         cell.number_format = FORMAT_TEXT
                     
-                    _apply_cell_style(cell, current_id, sheet_styling_config)
+                    _apply_cell_style(cell, current_id, sheet_styling_config, fob_mode)
 
                 # --- Apply Border Rules for the entire row ---
                 for c_idx_border in range(1, num_columns + 1):

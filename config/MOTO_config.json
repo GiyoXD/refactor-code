@@ -50,7 +50,7 @@
       "footer_configurations": {
   "comment": "This is the TEMPLATE for the main total row and the Grand Total row.",
 
-  "total_text": "TOTAL:",
+  "total_text": "TOTAL OF:",
   "total_text_column_id": "col_po",
   "pallet_count_column_id": "col_item",
 
@@ -101,15 +101,17 @@
       "start_row": 15,
       "header_to_write": [
         { "row": 0, "col": 0, "text": "No.",              "id": "col_no",         "rowspan": 1 },
-        { "row": 0, "col": 1, "text": "ITEM Nº",              "id": "col_item",       "rowspan": 1 },
-        { "row": 0, "col": 2, "text": "Quantity",                 "id": "col_qty_sf" },
-        { "row": 0, "col": 3, "text": "Unit Price(USD)",    "id": "col_unit_price", "rowspan": 1 },
-        { "row": 0, "col": 4, "text": "Total value(USD)",   "id": "col_amount",     "rowspan": 1 }
+        { "row": 0, "col": 1, "text": "P.O. Nº",              "id": "col_po",         "rowspan": 1 },
+        { "row": 0, "col": 2, "text": "ITEM Nº",              "id": "col_item",       "rowspan": 1 },
+        { "row": 0, "col": 3, "text": "Description",              "id": "col_desc",       "rowspan": 1 },
+        { "row": 0, "col": 4, "text": "Quantity",                 "id": "col_qty_sf" },
+        { "row": 0, "col": 5, "text": "Unit Price(USD)",    "id": "col_unit_price", "rowspan": 1 },
+        { "row": 0, "col": 6, "text": "Total value(USD)",   "id": "col_amount",     "rowspan": 1 }
       ],
       "mappings": {
         "po":         { "key_index": 0, "id": "col_po" },
         "item":       { "key_index": 1, "id": "col_item" },
-        "desc":       { "key_index": 3, "id": "col_desc", "fallback_on_none": "LEATHER" },
+        "description":       { "key_index": 3, "id": "col_desc", "fallback_on_none": "LEATHER" },
         "sqft":       { "value_key": "sqft_sum", "id": "col_qty_sf" },
         "unit_price": { "key_index": 2, "id": "col_unit_price" },
         "amount": {
@@ -140,12 +142,9 @@
           "border":    { "apply": true }
         },
         "number_formats": {
-          "col_qty_pcs": { "number_format": "#,##0" },
-          "col_qty_sf": { "number_format": "#,##0.00" },
-          "col_gross": { "number_format": "#,##0.00" },
-          "col_net": { "number_format": "#,##0.00" },
-          "col_cbm": { "number_format": "0.00" },
-          "col_amount": { "number_format": "#,##0.00" }
+          "col_unit_price": { "number_format": "#,##0.0000" },
+          "col_qty_sf": { "number_format": "#,##0.0000" },
+          "col_amount": { "number_format": "#,##0.0000" }
         },
         "merge_rules": [
           { "start_column_id": "col_no", "colspan": 2 }
@@ -159,10 +158,10 @@
         "default_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "header_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "column_id_styles": {
-          "col_amount":     { "number_format": "#,##0.00" },
-          "col_unit_price": { "number_format": "#,##0.00" },
-          "col_qty_sf":     { "number_format": "#,##0.00" },
-          "col_desc":       { "alignment": {"horizontal": "left"} }
+          "col_amount":     { "number_format": "#,##0.0000" },
+          "col_unit_price": { "number_format": "#,##0.0000" },
+          "col_qty_sf":     { "number_format": "#,##0.0000" },
+          "col_desc":       { "alignment": {"horizontal": "center"} }
         },
         "column_id_widths": {
           "col_no": 14, "col_desc": 35, "col_qty_sf": 27, "col_unit_price": 28, "col_amount": 47
@@ -171,7 +170,7 @@
       }
     },
     "Packing list": {
-      "start_row": 21,
+      "start_row": 20,
       "add_blank_before_footer": true,
       "static_content_before_footer": {
         "2": "LEATHER (HS.CODE: 4107.12.00)"
@@ -210,8 +209,6 @@
         }
       },
   "footer_configurations": {
-  "comment": "This is the TEMPLATE for the main total row and the Grand Total row.",
-
   "total_text": "TOTAL:",
   "total_text_column_id": "col_po",
   "pallet_count_column_id": "col_item",

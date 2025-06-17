@@ -1,0 +1,5 @@
+  "styling": {
+        "header_pattern_fill": { "fill_type": "solid", "start_color": "D3D3D3" }
+
+this is the varible to enable the header color I use it for keybay currently. 
+
