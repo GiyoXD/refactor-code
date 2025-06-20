@@ -173,7 +173,7 @@
         "column_id_widths": {
           "col_no": 14, "col_desc": 35, "col_qty_sf": 27, "col_unit_price": 28, "col_amount": 47
         },
-        "row_heights": { "header": 36, "data_default": 30 }
+        "row_heights": { "header": 13, "data_default": 15 }
       }
     },
     "Packing list": {

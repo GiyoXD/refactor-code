@@ -7,7 +7,7 @@
   },
   "data_mapping": {
     "Invoice": {
-      "start_row": 21,
+      "start_row": 19,
       "add_blank_before_footer": false,
       "static_content_before_footer": {
         "2": "HS CODE: 4202.92.00"
@@ -24,7 +24,7 @@
       "mappings": {
         "po":          { "key_index": 0, "id": "col_po" },
         "item":        { "key_index": 1, "id": "col_item" },
-        "description": { "key_index": 3, "id": "col_desc", "fallback_on_none": "LEATHER" },
+        "description": { "key_index": 3, "id": "col_desc", "fallback_on_none": "COW LEATHER\nDA BÒ THUỘC", "fallback_on_fob": "COW LEATHER" },
         "sqft":        { "value_key": "sqft_sum", "id": "col_qty_sf" },
         "unit_price":  { "key_index": 2, "id": "col_unit_price" },
         "amount": {
@@ -36,14 +36,14 @@
         "initial_static": {
           "type": "initial_static_rows",
           "column_header_id": "col_static",
-          "values": ["VENDOR#:", "Des: LEATHER","Case Qty:", "MADE IN CAMBODIA"]
+          "values": ["VENDOR#:", "Des: COW LEATHER", "MADE IN CAMBODIA"]
         }
       },
       "data_cell_merging_rule": {
         "col_item": {"rowspan": 1}
       },
       "weight_summary_config": {
-        "enabled": false,
+        "enabled": true,
         "label_col_id": "col_po",
         "value_col_id": "col_item"
       },
@@ -64,14 +64,14 @@
   ],
   "number_formats": {
     "col_qty_pcs": { "number_format": "#,##0" },
-    "col_qty_sf": { "number_format": "#,##0.0000" },
-    "col_gross": { "number_format": "#,##0.0000" },
-    "col_net": { "number_format": "#,##0.0000" },
-    "col_cbm": { "number_format": "0.0000" },
-    "col_amount": { "number_format": "#,##0.0000" }
+    "col_qty_sf": { "number_format": "#,##0.00" },
+    "col_gross": { "number_format": "#,##0.00" },
+    "col_net": { "number_format": "#,##0.00" },
+    "col_cbm": { "number_format": "0.00" },
+    "col_amount": { "number_format": "#,##0.00" }
   },
   "style": {
-    "font":      { "name": "Times New Roman", "size": 12, "bold": true },
+    "font":      { "name": "Times New Roman", "size": 10, "bold": true },
     "alignment": { "horizontal": "center", "vertical": "center" },
     "border":    { "apply": true }
   },
@@ -84,34 +84,33 @@
         "force_text_format_ids": ["col_po", "col_item"],
         "column_ids_with_full_grid": ["col_po", "col_desc", "col_item", "col_qty_sf", "col_unit_price", "col_amount"],
         "column_id_styles": {
-          "col_unit_price": { "number_format": "#,##0.0000" },
-          "col_amount": { "number_format": "#,##0.0000" },
-          "col_qty_sf":     { "number_format": "#,##0.0000" },
+          "col_unit_price": { "number_format": "#,##0.00" },
+          "col_amount": { "number_format": "#,##0.00" },
+          "col_qty_sf":     { "number_format": "#,##0.00" },
           "col_desc": { "alignment": {"horizontal": "center"} }
         },
         "column_id_widths": { "col_po": 28, "col_desc": 20 },
-        "default_font": { "name": "Times New Roman", "size": 12 },
-        "header_font": { "name": "Times New Roman", "size": 12, "bold": true },
+        "default_font": { "name": "Times New Roman", "size": 10 },
+        "header_font": { "name": "Times New Roman", "size": 10, "bold": true },
         "default_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "header_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
-        "row_heights": { "header": 35, "data_default": 35, "footer": 35 }
+        "row_heights": { "header": 30, "data_default": 30, "footer": 30 }
       }
     },
     "Contract": {
-      "start_row": 15,
+      "start_row": 20,
       "header_to_write": [
-        { "row": 0, "col": 0, "text": "No.",              "id": "col_no",         "rowspan": 1 },
-        { "row": 0, "col": 1, "text": "P.O. Nº",              "id": "col_po",         "rowspan": 1 },
-        { "row": 0, "col": 2, "text": "ITEM Nº",              "id": "col_item",       "rowspan": 1 },
-        { "row": 0, "col": 3, "text": "Description",              "id": "col_desc",       "rowspan": 1 },
-        { "row": 0, "col": 4, "text": "Quantity",                 "id": "col_qty_sf" },
-        { "row": 0, "col": 5, "text": "Unit Price(USD)",    "id": "col_unit_price", "rowspan": 1 },
-        { "row": 0, "col": 6, "text": "Total value(USD)",   "id": "col_amount",     "rowspan": 1 }
+        { "row": 0, "col": 0, "text": "P.O Nº",              "id": "col_po",         "rowspan": 1 },
+        { "row": 0, "col": 1, "text": "Name of Cormodity\nTên và miêu tả",              "id": "col_item",       "rowspan": 1 },
+        { "row": 0, "col": 2, "text": "Description\nTả hàng hóa",              "id": "col_desc",       "rowspan": 1 },
+        { "row": 0, "col": 3, "text": "Quantity(SF)\nSố lượng(SF)",                 "id": "col_qty_sf" },
+        { "row": 0, "col": 4, "text": "Unit Price(USD)\nĐơn giá)",    "id": "col_unit_price", "rowspan": 1 },
+        { "row": 0, "col": 5, "text": "Total value(USD)\nTrị giá",   "id": "col_amount",     "rowspan": 1 }
       ],
       "mappings": {
         "po":         { "key_index": 0, "id": "col_po" },
         "item":       { "key_index": 1, "id": "col_item" },
-        "description":       { "key_index": 3, "id": "col_desc", "fallback_on_none": "LEATHER" },
+        "description":       { "key_index": 3, "id": "col_desc", "fallback_on_none": "COW LEATHER\nDA BÒ THUỘC", "fallback_on_fob": "COW LEATHER" },
         "sqft":       { "value_key": "sqft_sum", "id": "col_qty_sf" },
         "unit_price": { "key_index": 2, "id": "col_unit_price" },
         "amount": {
@@ -124,8 +123,8 @@
       "footer_configurations": {
         "comment": "This is the TEMPLATE for the main total row and the Grand Total row.",
 
-        "total_text": "TOTAL:",
-        "total_text_column_id": "col_no",
+        "total_text": "TOTAL OF:",
+        "total_text_column_id": "col_po",
 
         "sum_column_ids": [
           "col_qty_pcs",
@@ -137,14 +136,17 @@
         ],
 
         "style": {
-          "font":      { "name": "Times New Roman", "size": 16, "bold": true },
+          "font":      { "name": "Times New Roman", "size": 10, "bold": true },
           "alignment": { "horizontal": "center", "vertical": "center" },
           "border":    { "apply": true }
         },
         "number_formats": {
-          "col_unit_price": { "number_format": "#,##0.0000" },
-          "col_qty_sf": { "number_format": "#,##0.0000" },
-          "col_amount": { "number_format": "#,##0.0000" }
+          "col_qty_pcs": { "number_format": "#,##0" },
+          "col_qty_sf": { "number_format": "#,##0.00" },
+          "col_gross": { "number_format": "#,##0.00" },
+          "col_net": { "number_format": "#,##0.00" },
+          "col_cbm": { "number_format": "0.00" },
+          "col_amount": { "number_format": "#,##0.00" }
         },
         "merge_rules": [
           { "start_column_id": "col_no", "colspan": 2 }
@@ -153,24 +155,24 @@
       "styling": {
         "force_text_format_ids": ["col_po", "col_item", "col_no"],
         "column_ids_with_full_grid": ["col_no", "col_po", "col_item", "col_desc", "col_qty_sf", "col_unit_price", "col_amount"],
-        "default_font": { "name": "Times New Roman", "size": 14 },
-        "header_font": { "name": "Times New Roman", "size": 16, "bold": true },
+        "default_font": { "name": "Times New Roman", "size": 10 },
+        "header_font": { "name": "Times New Roman", "size": 10, "bold": true },
         "default_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "header_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "column_id_styles": {
-          "col_amount":     { "number_format": "#,##0.0000" },
-          "col_unit_price": { "number_format": "#,##0.0000" },
-          "col_qty_sf":     { "number_format": "#,##0.0000" },
+          "col_amount":     { "number_format": "#,##0.00" },
+          "col_unit_price": { "number_format": "#,##0.000000000" },
+          "col_qty_sf":     { "number_format": "#,##0.00" },
           "col_desc":       { "alignment": {"horizontal": "center"} }
         },
         "column_id_widths": {
-          "col_no": 14, "col_desc": 20, "col_qty_sf": 27, "col_unit_price": 28, "col_amount": 47
+          "col_no": 14, "col_desc": 35, "col_qty_sf": 27, "col_unit_price": 28, "col_amount": 47
         },
-        "row_heights": { "header": 36, "data_default": 30 }
+        "row_heights": { "header": 29, "data_default": 21 }
       }
     },
     "Packing list": {
-      "start_row": 20,
+      "start_row": 19,
       "add_blank_before_footer": true,
       "static_content_before_footer": {
         "2": "LEATHER (HS.CODE: 4107.12.00)"
@@ -195,12 +197,12 @@
         "initial_static": {
           "type": "initial_static_rows",
           "column_header_id": "col_static",
-          "values": ["VENDOR#:", "Des: LEATHER", "Case Qty:", "MADE IN CAMBODIA"]
+          "values": ["VENDOR#:", "Des: COW LEATHER", "Case Qty:", "MADE IN CAMBODIA"]
         },
         "data_map": {
           "po":    { "id": "col_po" },
           "item":  { "id": "col_item" },
-          "description": { "id": "col_desc", "fallback_on_none": "LEATHER" },
+          "description": { "id": "col_desc", "fallback_on_none": "COW LEATHER\nDA BÒ THUỘC", "fallback_on_fob": "COW LEATHER" },
           "pcs":   { "id": "col_qty_pcs" },
           "sqft":  { "id": "col_qty_sf" },
           "net":   { "id": "col_net" },
@@ -209,7 +211,9 @@
         }
       },
   "footer_configurations": {
-  "total_text": "TOTAL:",
+  "comment": "This is the TEMPLATE for the main total row and the Grand Total row.",
+
+  "total_text": "TOTAL OF:",
   "total_text_column_id": "col_po",
   "pallet_count_column_id": "col_item",
 
@@ -246,7 +250,7 @@
         "header_font": { "name": "Times New Roman", "size": 12, "bold": true },
         "header_alignment": { "horizontal": "center", "vertical": "center", "wrap_text": true },
         "column_id_styles": {
-          "col_static": { "alignment": {"horizontal": "left", "vertical": "top"}, "font": {"size": 12} },
+          "col_static": { "alignment": {"horizontal": "left", "vertical": "top"} },
           "col_desc":   { "alignment": {"horizontal": "center"} },
           "col_net":    { "number_format": "#,##0.00" },
           "col_gross":  { "number_format": "#,##0.00" },
@@ -255,7 +259,7 @@
           "col_qty_sf": { "number_format": "#,##0.00" }
         },
         "column_id_widths": {
-          "col_static": 24.71, "col_po": 17, "col_item": 22.14, "col_desc": 20, "col_qty_pcs": 15, "col_qty_sf": 15, "col_net": 15, "col_gross": 15, "col_cbm": 15
+          "col_static": 24.71, "col_po": 17, "col_item": 22.14, "col_desc": 26, "col_qty_pcs": 15, "col_qty_sf": 15, "col_net": 15, "col_gross": 15, "col_cbm": 15
         },
         "row_heights": { "header": 27, "data_default": 27, "before_footer": 27 }
       }

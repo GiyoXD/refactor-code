@@ -833,7 +833,8 @@ def apply_explicit_data_cell_merges_by_id(
     column_id_map: Dict[str, int],  # Maps column ID to its 1-based column index
     num_total_columns: int,
     merge_rules_data_cells: Dict[str, Dict[str, Any]], # e.g., {'col_item': {'rowspan': 2}}
-    sheet_styling_config: Optional[Dict[str, Any]]
+    sheet_styling_config: Optional[Dict[str, Any]] = None,
+    fob_mode: Optional[bool] = False
 ):
     """
     Applies horizontal merges to data cells in a specific row based on column IDs.
@@ -917,6 +918,7 @@ def prepare_data_rows(
     desc_col_idx: int,
     num_static_labels: int,
     static_value_map: Dict[int, Any],
+    fob_mode: bool,
 ) -> Tuple[List[Dict[int, Any]], List[int], bool, int]:
     """
     Final Corrected Version: Removes the redundant parsing of custom_aggregation keys.
@@ -1002,8 +1004,10 @@ def prepare_data_rows(
                     if target_id in NUMERIC_IDS: data_value = _to_numeric(data_value)
                     if data_value is not None:
                         row_dict[target_col_idx] = data_value
-                    elif "fallback_on_none" in mapping_rule:
+                    elif "fallback_on_none" in mapping_rule and not fob_mode:
                         row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
+                    elif "fallback_on_fob" in mapping_rule and fob_mode:
+                        row_dict[target_col_idx] = mapping_rule["fallback_on_fob"]
                 if amount_col_idx:
                     row_dict[amount_col_idx] = {"type": "formula", "template": "{col_ref_1}{row}*{col_ref_0}{row}", "inputs": ["col_qty_sf", "col_unit_price"]}
                 data_rows_prepared.append(row_dict)
@@ -1028,8 +1032,10 @@ def prepare_data_rows(
                         is_empty = data_value is None or (isinstance(data_value, str) and not data_value.strip())
                         if not is_empty:
                             row_dict[target_col_idx] = data_value
-                        elif "fallback_on_none" in mapping_rule and dynamic_desc_used == False:
+                        elif "fallback_on_none" in mapping_rule and dynamic_desc_used == False and not fob_mode:
                             row_dict[target_col_idx] = mapping_rule["fallback_on_none"]
+                        elif "fallback_on_fob" in mapping_rule and dynamic_desc_used == False and fob_mode:
+                            row_dict[target_col_idx] = mapping_rule["fallback_on_fob"]
                 data_rows_prepared.append(row_dict)
     
     # --- Final Processing Steps ---
@@ -1043,6 +1049,7 @@ def prepare_data_rows(
      # --- Centralized Check for Dynamic Description ---
     # This single block runs after the data is prepared, regardless of source.
     fallback_on_none = dynamic_mapping_rules.get("description", {}).get("fallback_on_none")
+    fallback_on_fob = dynamic_mapping_rules.get("description", {}).get("fallback_on_fob")
     desc_col_idx = column_id_map.get("col_desc")
     po_col_idx = column_id_map.get("col_po")
     if desc_col_idx:
@@ -1051,9 +1058,10 @@ def prepare_data_rows(
             # If a meaningful description is found, set the flag and stop checking.
             if desc_value and str(desc_value).strip():
                 break
-            elif fallback_on_none and row_data.get(po_col_idx):
+            elif fallback_on_none and row_data.get(po_col_idx) and not fob_mode:
                 row_data[desc_col_idx] = fallback_on_none
-
+            elif fallback_on_fob and row_data.get(po_col_idx) and fob_mode:
+                row_data[desc_col_idx] = fallback_on_fob
     # --- Final Processing Steps ---
     if static_value_map:
         for row_data in data_rows_prepared:
@@ -1069,7 +1077,8 @@ def _style_row_before_footer(
     num_columns: int,
     sheet_styling_config: Optional[Dict[str, Any]],
     idx_to_id_map: Dict[int, str],
-    col1_index: int
+    col1_index: int,
+    fob_mode: Optional[bool] = False
 ):
     """
     Applies specific styling and borders to the static row before the main footer.
@@ -1195,7 +1204,8 @@ def write_summary_rows(
     table_keys: List[str],
     footer_config: Dict[str, Any],
     mapping_rules: Dict[str, Any],
-    styling_config: Optional[Dict[str, Any]] = None
+    styling_config: Optional[Dict[str, Any]] = None,
+    fob_mode: Optional[bool] = False
 ) -> int:
     """
     Calculates and writes ID-driven summary rows, ensuring text cells are
@@ -1457,6 +1467,7 @@ def fill_invoice_data(
     grand_total_pallets: int = 0, # RE-ADDED parameter
     custom_flag: bool = False, # Added custom flag parameter
     data_cell_merging_rules: Optional[Dict[str, Any]] = None, # Added data cell merging rules 29/05/2025
+    fob_mode: Optional[bool] = False,
     ) -> Tuple[bool, int, int, int, int]: # Still 5 return values
     """
     REVISED LOGIC V13: Added merge_rules_footer parameter.
@@ -1586,6 +1597,7 @@ def fill_invoice_data(
             desc_col_idx=desc_col_idx,
             num_static_labels=num_static_labels,
             static_value_map=static_value_map,
+            fob_mode=fob_mode,
         )
 # --- Determine Final Number of Data Rows ---
 # The number of rows to process is the greater of the number of data rows or static labels.
@@ -1770,7 +1782,8 @@ def fill_invoice_data(
                         column_id_map=col_id_map,
                         num_total_columns=num_columns,
                         merge_rules_data_cells=data_cell_merging_rules,
-                        sheet_styling_config=sheet_styling_config
+                        sheet_styling_config=sheet_styling_config,
+                        fob_mode=fob_mode
                     )
 
         except Exception as fill_data_err:
@@ -1814,7 +1827,8 @@ def fill_invoice_data(
                     num_columns=num_columns,
                     sheet_styling_config=sheet_styling_config,
                     idx_to_id_map=idx_to_id_map, # Pass the ID map here
-                    col1_index=col1_index
+                    col1_index=col1_index,
+                    fob_mode=fob_mode
                 )
             except Exception as fill_bf_err:
                 print(f"Warning: Error filling/styling row before footer: {fill_bf_err}")

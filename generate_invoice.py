@@ -516,6 +516,7 @@ def process_single_table_sheet(
         grand_total_pallets=final_grand_total_pallets,
         custom_flag=args.custom,
         data_cell_merging_rules=data_cell_merging_rules,
+        fob_mode=args.fob,
     )
 
     if not fill_success:
@@ -800,6 +801,7 @@ def main():
                         grand_total_pallets=final_grand_total_pallets,
                         custom_flag=args.custom,
                         data_cell_merging_rules=data_cell_merging_rules,
+                        fob_mode=args.fob,
                     )
                     # fill_invoice_data now handles writing blank rows, data, footer row
                     # within the allocated space. next_row_after_chunk is the row AFTER its footer.
@@ -901,6 +903,7 @@ def main():
                         footer_config=footer_config_for_summary, # <-- Pass the config here
                         mapping_rules=sheet_inner_mapping_rules_dict,
                         styling_config=sheet_styling_config,
+                        fob_mode=args.fob
                     )
                 # --- End Summary Rows Logic ---
                 # --- Apply Column Widths AFTER loop using the last header info ---
